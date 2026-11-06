@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Lint
+        run: uv run --no-project --with ruff ruff check . && uv run --no-project --with ruff ruff format --check .
+      - name: Tests
+        run: uv run --no-project --with pytest pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: page.js syntax
+        run: node --check page.js
