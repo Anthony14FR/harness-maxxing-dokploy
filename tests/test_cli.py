@@ -71,3 +71,23 @@ def test_an_exposed_key_is_flagged(connected, maxxing_bin, capsys):
 def test_ambiguous_names_ask_for_the_id(connected, capsys):
     code, _, err = run(connected, capsys, "deploy", "web", "--yes")
     assert code == 2 and "ambiguous" in err
+
+
+def test_sessions_cannot_write_to_a_protected_service_nor_lift_it(connected, core, state, fake, capsys):
+    core.set_protected(state, "c1", True)
+    for args in (["redeploy", "c1", "--yes"], ["domain", "add", "stack", "s.example.com", "--service", "web", "--yes"]):
+        code, _, err = run(connected, capsys, *args)
+        assert code == 2 and "protected" in err
+    assert not fake.writes()
+    out = run(connected, capsys, "list")[1]
+    assert "[protected]" in out.splitlines()[[i for i, x in enumerate(out.splitlines()) if "stack" in x][0]]
+    with pytest.raises(SystemExit):
+        connected.main(["unprotect", "c1"])  # no such command: only the user lifts it, on the page
+    capsys.readouterr()
+
+
+def test_the_question_carries_the_risks(connected, capsys):
+    err = run(connected, capsys, "deploy", "api")[2]
+    assert "down for a few seconds" in err
+    err = run(connected, capsys, "deploy", "a1")[2]
+    assert "tell the user" not in err

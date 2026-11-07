@@ -64,3 +64,34 @@ def test_unknown_route_and_disconnect(api, fake, state):
     assert api.handle(ctx(state, keys), "DELETE", "services", {}, None)[0] == 404
     assert api.handle(ctx(state, keys), "POST", "disconnect", {}, None) == {"disconnected": True}
     assert not Path(state, "settings.json").exists()
+
+
+def test_a_protected_service_cannot_be_deployed_from_the_page(api, fake, state):
+    keys = {"DOKPLOY_API_KEY": KEY}
+    api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "stack", "on": True}) == {
+        "id": "c1",
+        "protected": True,
+    }
+    svcs = {s["id"]: s for s in api.handle(ctx(state, keys), "GET", "services", {}, None)["services"]}
+    assert svcs["c1"]["protected"] and svcs["c1"]["risks"] == ["downtime", "no_rebuild"]
+    assert not svcs["a1"]["protected"] and svcs["a1"]["risks"] == []
+    code, err = api.handle(ctx(state, keys), "POST", "deploy", {}, {"id": "c1"})
+    assert code == 409 and err["error"] == "protected" and not fake.writes()
+    api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "c1", "on": False})
+    assert api.handle(ctx(state, keys), "POST", "deploy", {}, {"id": "c1"}) == {"started": "c1"}
+
+
+def test_protect_needs_a_real_service_but_lifting_does_not(api, fake, state):
+    keys = {"DOKPLOY_API_KEY": KEY}
+    api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "nope", "on": True})[0] == 404
+    api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "a1", "on": True})
+    code, err = api.handle(ctx(state, keys), "POST", "deploy", {}, {"id": "a1", "again": True})
+    assert code == 409 and err["error"] == "protected"
+    keys["DOKPLOY_API_KEY"] = "changed"  # lifting still works with the key to re-check, and for a gone service
+    assert api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "a1", "on": False}) == {
+        "id": "a1",
+        "protected": False,
+    }
+    assert api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "gone", "on": False})["protected"] is False

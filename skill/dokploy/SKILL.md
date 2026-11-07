@@ -27,6 +27,10 @@ python3 $D app create --environment ID --name N --repo URL [--branch B] [--build
 - **Ask before every write.** `deploy`, `redeploy`, `domain add` and `app create` change a live service: say what
   will happen (which app, which project, which domain) and wait for the user's yes before adding `--yes`. A command
   without `--yes` stops with exit code 3 and changes nothing.
+- **Protected services** (`[protected]` in `list`, `"protected": true` in `--json`) are read-only: deploy, redeploy
+  and domain add are refused (`protected`). Never look for a way around it: only the user lifts it, on the Dokploy page in Harness.
+- **Say the risks before asking.** A deploy without `--yes` prints them (`tell the user: ...`): a compose stack or an
+  app that is not start-first is down for a few seconds; a service with no git source rebuilds nothing.
 - APP is the id, the name or the app name from `list`; a name used in two projects needs the id.
 - A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`,
   `ssh://` or `git@host:path`. A domain also needs its DNS pointing to the server, then a redeploy.

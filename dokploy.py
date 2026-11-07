@@ -119,6 +119,19 @@ def _agreed(a: argparse.Namespace, what: str) -> bool:
     return False
 
 
+RISK_TEXT = {
+    "downtime": "its containers are stopped and started again: the site can be down for a few seconds",
+    "no_rebuild": "it has no git source: nothing is rebuilt, the same image starts again",
+    "unknown": "Dokploy did not give its details: assume the site can go down",
+}
+
+
+def _warned(svc: dict) -> str:
+    """The risks of a deploy, appended to the question Claude puts to the user."""
+    r = [RISK_TEXT[x] for x in core.risks(svc)]
+    return f" (tell the user: {'; '.join(r)})" if r else ""
+
+
 def _urls(s: dict) -> str:
     return " ".join(
         ("https://" if d["https"] else "http://") + d["host"] + (d["path"] if d["path"] != "/" else "")
@@ -158,7 +171,8 @@ def run(a: argparse.Namespace) -> int:
         app_id = core.app_create(c, a.environment, a.name, a.repo, a.branch, a.build, a.build_path)
         print(f"created {a.name} ({app_id}); deploy it with: dokploy.py deploy {app_id} --yes")
         return 0
-    svcs = core.inventory(c)
+    prot = core.protected(st)
+    svcs = [{**s, "protected": s["id"] in prot, "risks": core.risks(s)} for s in core.inventory(c)]
     if a.action == "list":
         if a.json:
             print(json.dumps(svcs, indent=2))
@@ -167,14 +181,16 @@ def run(a: argparse.Namespace) -> int:
                 where = (s["project"] or "") + (f"/{s['environment']}" if s["environment"] else "")
                 print(
                     f"{(s['status'] or '-'):<8} {s['kind']:<11} {where[:28]:<28} {s['name'][:28]:<28} "
-                    f"{s['id']:<24} {_urls(s)}"
+                    f"{s['id']:<24} {_urls(s)}{'  [protected]' if s['protected'] else ''}"
                 )
             if not svcs:
                 print("Nothing in Dokploy yet.")
         return 0
     svc = core.find(svcs, a.app)
+    if a.action in ("deploy", "redeploy") or getattr(a, "sub", None) == "add":
+        core.guard(st, svc)  # protected: refused before even asking the user
     if a.action in ("deploy", "redeploy"):
-        if not _agreed(a, f"{a.action} {svc['project']}/{svc['name']}"):
+        if not _agreed(a, f"{a.action} {svc['project']}/{svc['name']}{_warned(svc)}"):
             return 3
         core.deploy(c, svc, a.title, again=a.action == "redeploy")
         print(f"{a.action} of {svc['name']} started; follow it with: dokploy.py logs {svc['id']}")

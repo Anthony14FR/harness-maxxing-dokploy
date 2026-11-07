@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -62,11 +64,27 @@ def fingerprint(key: str) -> str:
 
 
 def load_settings(state_dir: str | Path) -> dict:
-    try:
-        s = json.loads((Path(state_dir) / "settings.json").read_text())
-    except (OSError, ValueError):
+    """{} when there is none yet; an unreadable file fails closed, so protected services never silently open."""
+    f = Path(state_dir) / "settings.json"
+    if not f.exists():
         return {}
-    return s if isinstance(s, dict) else {}
+    try:
+        s = json.loads(f.read_text())
+    except (OSError, ValueError):
+        s = None
+    if not isinstance(s, dict) or not isinstance(s.get("protected", []), list):
+        raise DokployError("bad_settings", f"{f} cannot be read: fix or delete it, then connect again")
+    return s
+
+
+@contextlib.contextmanager
+def _locked(state_dir: str | Path):
+    """Serialises read-modify-write of settings.json between the page's requests and sessions."""
+    d = Path(state_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / ".settings.lock", "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
 
 
 def save_settings(state_dir: str | Path, settings: dict | None) -> None:
@@ -145,14 +163,50 @@ def connect(state_dir: str | Path, secret: Secret, url: str) -> dict:
     projects = Client(base, key).get("project.all")
     if not isinstance(projects, list):
         raise DokployError("bad_response", "project.all did not answer a list")
-    save_settings(state_dir, {"url": base, "key": fingerprint(key)})
+    with _locked(state_dir):
+        save_settings(state_dir, {**load_settings(state_dir), "url": base, "key": fingerprint(key)})
     return {"connected": True, "url": base, "projects": len(projects)}
 
 
 def disconnect(state_dir: str | Path) -> bool:
-    had = bool(load_settings(state_dir))
-    save_settings(state_dir, None)
-    return had
+    """Forgets the address and the key's fingerprint; protected services stay protected."""
+    with _locked(state_dir):
+        s = load_settings(state_dir)
+        rest = {k: v for k, v in s.items() if k not in ("url", "key")}
+        save_settings(state_dir, rest or None)
+    return bool(s.get("url"))
+
+
+def protected(state_dir: str | Path) -> set[str]:
+    p = load_settings(state_dir).get("protected")
+    return {x for x in p if isinstance(x, str)} if isinstance(p, list) else set()
+
+
+def set_protected(state_dir: str | Path, svc_id: str, on: bool) -> set[str]:
+    """Only the page calls this; dokploy.py has no command for it."""
+    with _locked(state_dir):
+        ids = protected(state_dir)
+        (ids.add if on else ids.discard)(svc_id)
+        save_settings(state_dir, {**load_settings(state_dir), "protected": sorted(ids)})
+    return ids
+
+
+def guard(state_dir: str | Path, svc: dict) -> None:
+    """Every write goes through this first: a protected service is read-only."""
+    if svc["id"] in protected(state_dir):
+        raise DokployError("protected", f"{svc['name']} is protected: lift it on the Dokploy page in Harness first")
+
+
+def risks(svc: dict) -> list[str]:
+    """What a deploy does beyond the obvious, for the confirmation: downtime, nothing rebuilt."""
+    out = []
+    if svc["kind"] in _PLURAL and svc.get("detailed") is False:
+        return ["downtime", "unknown"]  # Dokploy did not give its details: assume the worst
+    if svc["kind"] == "compose" or (svc["kind"] == "application" and not svc.get("start_first")):
+        out.append("downtime")  # compose recreates its containers; a swarm app stops first unless start-first
+    if svc.get("source") in ("raw", "docker", "drop"):
+        out.append("no_rebuild")  # no git source: the same image(s) start again
+    return out
 
 
 def client(state_dir: str | Path, secret: Secret) -> Client:
@@ -256,7 +310,14 @@ def _service(kind: str, s: dict, p: dict, e: dict) -> dict:
         ],
         "repo": _repo(s) if kind in _PLURAL else None,
         "build": s.get("buildType") if kind == "application" else None,
+        "source": s.get("sourceType") if kind in _PLURAL else None,
+        "start_first": _start_first(s) if kind == "application" else None,
     }
+
+
+def _start_first(a: dict) -> bool | None:
+    u = a.get("updateConfigSwarm")
+    return (u.get("Order") == "start-first") if isinstance(u, dict) else None
 
 
 def services(projects: Any) -> list[dict]:
@@ -295,9 +356,9 @@ def inventory(c: Client) -> list[dict]:
         try:
             full = c.get(f"{s['kind']}.one", {_ID[s["kind"]]: s["id"]})
         except DokployError:
-            return s  # shown with what project.all gave
+            return {**s, "detailed": False}  # shown with what project.all gave
         if not isinstance(full, dict):
-            return s
+            return {**s, "detailed": False}
         more = _service(
             s["kind"],
             {**full, _ID[s["kind"]]: s["id"]},
@@ -308,6 +369,7 @@ def inventory(c: Client) -> list[dict]:
             **s,
             **{k: v for k, v in more.items() if v not in (None, [], "") or k == "domains"},
             "environment": s["environment"],
+            "detailed": True,
         }
 
     todo = [s for s in svcs if s["kind"] in _PLURAL]

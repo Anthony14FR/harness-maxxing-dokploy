@@ -210,3 +210,67 @@ def test_logs_stay_inside_the_dokploy_folder(core, fake, tmp_path):
         with pytest.raises(core.DokployError) as e:
             core.log({"log_path": p})
         assert e.value.code == "remote_log"
+
+
+def test_risks_follow_the_kind_the_source_and_the_update_order(core, fake):
+    svcs = core.inventory(core.Client(fake.url, KEY))
+    assert core.risks(core.find(svcs, "a1")) == []  # git source, start-first update
+    assert core.risks(core.find(svcs, "a2")) == ["downtime"]  # swarm default: stop first
+    assert core.risks(core.find(svcs, "c1")) == ["downtime", "no_rebuild"]  # raw compose
+    assert core.find(svcs, "c1")["source"] == "raw" and core.find(svcs, "a1")["start_first"] is True
+
+
+def test_protection_is_kept_across_reconnect_and_disconnect(core, fake, state):
+    sec = secret_of({core.KEY: KEY})
+    core.connect(state, sec, fake.url)
+    svc = core.find(core.inventory(core.client(state, sec)), "c1")
+    core.guard(state, svc)  # not protected yet
+    assert core.set_protected(state, "c1", True) == {"c1"}
+    core.connect(state, sec, fake.url)
+    assert core.disconnect(state) and core.protected(state) == {"c1"}
+    assert not core.status(state, sec)["connected"]
+    with pytest.raises(core.DokployError) as e:
+        core.guard(state, svc)
+    assert e.value.code == "protected"
+    core.set_protected(state, "c1", False)
+    core.guard(state, svc)
+
+
+def test_an_unreadable_settings_file_fails_closed(core, fake, state):
+    sec = secret_of({core.KEY: KEY})
+    core.connect(state, sec, fake.url)
+    svc = core.find(core.inventory(core.client(state, sec)), "a1")
+    for bad in ("{not json", '{"url": "x", "protected": "a1"}', "[]"):
+        (state / "settings.json").write_text(bad)
+        with pytest.raises(core.DokployError) as e:
+            core.guard(state, svc)
+        assert e.value.code == "bad_settings"
+        with pytest.raises(core.DokployError):
+            core.set_protected(state, "a1", True)  # never overwrites a file it cannot read
+        assert (state / "settings.json").read_text() == bad
+
+
+def test_concurrent_protects_keep_every_id(core, state):
+    import threading
+
+    ids = [f"s{i}" for i in range(20)]
+    threads = [threading.Thread(target=core.set_protected, args=(state, i, True)) for i in ids]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert core.protected(state) == set(ids)
+
+
+def test_a_service_without_details_is_assumed_risky(core, fake):
+    fake.broken.add("application.one")
+    svcs = core.inventory(core.Client(fake.url, KEY))
+    a1 = core.find(svcs, "a1")
+    assert a1["detailed"] is False and core.risks(a1) == ["downtime", "unknown"]
+    assert core.find(svcs, "c1")["detailed"] is True
+
+
+def test_no_update_config_means_stop_first(core):
+    app = {"kind": "application", "source": "git", "start_first": None, "detailed": True}
+    assert core.risks(app) == ["downtime"]
+    assert core.risks({**app, "start_first": True, "source": "docker"}) == ["no_rebuild"]

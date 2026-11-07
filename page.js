@@ -11,6 +11,14 @@ const T = {
     confirmDeploy: (n) => `Deploy ${n} now?`, confirmRedeploy: (n) => `Rebuild and redeploy ${n} now?`,
     started: (n) => `Deployment of ${n} started.`, noLog: "No deployment yet.",
     cols: ["State", "Kind", "Project", "Name", "Domains", ""],
+    risk: {
+      downtime: "Its containers are stopped and started again: the site can be down for a few seconds.",
+      no_rebuild: "It has no git source: nothing is rebuilt, the same image starts again.",
+      unknown: "Dokploy did not give its details: assume the site can go down.",
+    },
+    typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
+    protect: "Protect", unprotect: "Unprotect", protectedBadge: "protected",
+    protectedHelp: "Protected: read-only here and for sessions. Only you can lift it, on this page.",
   },
   fr: {
     title: "Dokploy",
@@ -23,6 +31,14 @@ const T = {
     confirmDeploy: (n) => `Déployer ${n} maintenant ?`, confirmRedeploy: (n) => `Reconstruire et redéployer ${n} maintenant ?`,
     started: (n) => `Déploiement de ${n} lancé.`, noLog: "Aucun déploiement pour l’instant.",
     cols: ["État", "Type", "Projet", "Nom", "Domaines", ""],
+    risk: {
+      downtime: "Ses conteneurs sont arrêtés puis relancés : le site peut être coupé quelques secondes.",
+      no_rebuild: "Il n’a pas de source git : rien n’est reconstruit, la même image redémarre.",
+      unknown: "Dokploy n’a pas donné ses détails : considérez que le site peut être coupé.",
+    },
+    typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
+    protect: "Protéger", unprotect: "Ne plus protéger", protectedBadge: "protégé",
+    protectedHelp: "Protégé : en lecture seule ici et pour les sessions. Vous seul pouvez lever la protection, sur cette page.",
   },
 };
 
@@ -78,14 +94,46 @@ export function mount(el, ctx) {
         h("button", { class: "ui-btn ui-ghost ui-sm", onclick: close }, t.close)), pre);
   }
 
+  // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
+  function confirmPanel(svc, question, run, close) {
+    const risks = svc.risks || ["unknown"];
+    const typed = risks.includes("downtime") || risks.includes("unknown");
+    const name = String(svc.name).trim();
+    const input = typed ? h("input", { class: "ui-input", placeholder: t.typeName(name), "aria-label": t.typeName(name) }) : null;
+    const ok = h("button", { class: "ui-btn ui-danger ui-sm", disabled: typed }, t.confirm);
+    const go = async () => {
+      if (ok.disabled) return;
+      ok.disabled = true;
+      await run();
+      close();
+    };
+    if (input) {
+      input.addEventListener("input", () => { ok.disabled = input.value.trim() !== name; });
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    }
+    ok.addEventListener("click", go);
+    const panel = h("div", { class: "ui-card ui-stack" },
+      h("b", {}, question),
+      risks.map((r) => h("div", { class: "ui-callout ui-warning" }, t.risk[r] || r)),
+      input,
+      h("div", { class: "ui-row", style: "gap:8px" }, ok, h("button", { class: "ui-btn ui-ghost ui-sm", onclick: close }, t.cancel)));
+    queueMicrotask(() => (input || ok).focus());
+    return panel;
+  }
+
   function table(services) {
     const slot = h("div");
-    const deploy = async (svc, again) => {
-      if (!window.confirm((again ? t.confirmRedeploy : t.confirmDeploy)(svc.name))) return;
-      try {
-        await ctx.api("deploy", { method: "POST", body: { id: svc.id, again } });
-        say(t.started(svc.name), "ui-success");
-      } catch (e) { fail(e); }
+    const close = () => slot.replaceChildren();
+    const deploy = (svc, again) => slot.replaceChildren(confirmPanel(svc,
+      (again ? t.confirmRedeploy : t.confirmDeploy)(svc.name),
+      async () => {
+        try {
+          await ctx.api("deploy", { method: "POST", body: { id: svc.id, again } });
+          say(t.started(svc.name), "ui-success");
+        } catch (e) { fail(e); }
+      }, close));
+    const protect = async (svc, on) => {
+      try { await ctx.api("protect", { method: "POST", body: { id: svc.id, on } }); load(); } catch (e) { fail(e); }
     };
     const rows = services.map((s) => {
       const deployable = s.kind === "application" || s.kind === "compose";
@@ -93,16 +141,21 @@ export function mount(el, ctx) {
         const href = `${d.https ? "https" : "http"}://${d.host}${d.path !== "/" ? d.path : ""}`;
         return h("a", { class: "ui-link", href, target: "_blank", rel: "noopener noreferrer" }, d.host);
       });
+      const writes = deployable && !s.protected ? [
+        h("button", { class: "ui-btn ui-sm", onclick: () => deploy(s, false) }, t.deploy), " ",
+        h("button", { class: "ui-btn ui-secondary ui-sm", onclick: () => deploy(s, true) }, t.redeploy), " ",
+      ] : [];
       return h("tr", {},
         h("td", {}, h("span", { class: `ui-badge ${BADGE[s.status] || "ui-outline"}` }, s.status || "-")),
         h("td", {}, s.kind),
         h("td", {}, s.project + (s.environment ? ` / ${s.environment}` : "")),
-        h("td", {}, h("b", {}, s.name)),
+        h("td", {}, h("b", {}, s.name), s.protected ? [" ", h("span", { class: "ui-badge ui-primary", title: t.protectedHelp }, t.protectedBadge)] : null),
         h("td", {}, links.length ? links.flatMap((a, i) => (i ? [" ", a] : [a])) : "-"),
         h("td", { style: "white-space:nowrap" }, deployable ? [
-          h("button", { class: "ui-btn ui-sm", onclick: () => deploy(s, false) }, t.deploy), " ",
-          h("button", { class: "ui-btn ui-secondary ui-sm", onclick: () => deploy(s, true) }, t.redeploy), " ",
-          h("button", { class: "ui-btn ui-ghost ui-sm", onclick: () => slot.replaceChildren(logPanel(s, () => slot.replaceChildren())) }, t.logs),
+          ...writes,
+          h("button", { class: "ui-btn ui-ghost ui-sm", onclick: () => slot.replaceChildren(logPanel(s, close)) }, t.logs), " ",
+          h("button", { class: "ui-btn ui-outline ui-sm", title: t.protectedHelp, onclick: () => protect(s, !s.protected) },
+            s.protected ? t.unprotect : t.protect),
         ] : ""));
     });
     if (!rows.length) return h("p", { class: "ui-empty" }, t.empty);

@@ -34,6 +34,8 @@ PROJECTS = [
                         "buildType": "nixpacks",
                         "owner": "acme",
                         "repository": "web",
+                        "sourceType": "github",
+                        "updateConfigSwarm": {"Order": "start-first", "Parallelism": 1},
                         "domains": [{"host": "web.example.com", "https": True, "port": 3000, "path": "/"}],
                     },
                     {
@@ -42,10 +44,20 @@ PROJECTS = [
                         "appName": "acme-api-x2",
                         "applicationStatus": "error",
                         "customGitUrl": "https://git.example.com/acme/api.git",
+                        "sourceType": "git",
                         "domains": [],
                     },
                 ],
-                "compose": [{"composeId": "c1", "name": "stack", "appName": "acme-stack", "composeStatus": "running"}],
+                "compose": [
+                    {
+                        "composeId": "c1",
+                        "name": "stack",
+                        "appName": "acme-stack",
+                        "composeStatus": "running",
+                        "sourceType": "raw",
+                        "composeType": "docker-compose",
+                    }
+                ],
                 "postgres": [{"postgresId": "pg1", "name": "db", "appName": "acme-db"}],
             }
         ],
@@ -84,6 +96,7 @@ class FakeDokploy:
     def __init__(self, logs: Path):
         self.calls: list[tuple[str, str, dict]] = []
         self.logs = logs
+        self.broken: set[str] = set()  # procedures that answer 500
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -120,6 +133,8 @@ class FakeDokploy:
         proc = u.path.removeprefix("/api/")
         data = json.loads(raw) if raw else dict(parse_qsl(u.query))
         self.calls.append((method, proc, data))
+        if proc in self.broken:
+            return 500, {"message": "boom"}
         if proc == "project.all":
             return 200, _slim()
         if proc == "redirect.me":

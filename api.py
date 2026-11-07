@@ -30,11 +30,23 @@ def handle(ctx, method, path, query, body):
             return core.connect(state, secret, str(body.get("url") or ""))
         if path == "disconnect" and method == "POST":
             return {"disconnected": core.disconnect(state)}
+        if path == "protect" and method == "POST" and not body.get("on"):  # lifting works offline, and for gone ids
+            sid = str(body.get("id") or "")
+            return {"id": sid, "protected": sid in core.set_protected(state, sid, False)}
         c = core.client(state, secret)
         if path == "services" and method == "GET":
-            return {"services": core.inventory(c)}
+            prot = core.protected(state)
+            svcs = core.inventory(c)
+            return {"services": [{**s, "protected": s["id"] in prot, "risks": core.risks(s)} for s in svcs]}
+        if path == "protect" and method == "POST":  # the user's own toggle on the page (on: the service must exist)
+            svc = core.find(core.inventory(c), str(body.get("id") or ""))
+            return {
+                "id": svc["id"],
+                "protected": svc["id"] in core.set_protected(state, svc["id"], bool(body.get("on"))),
+            }
         if path == "deploy" and method == "POST":  # the page asked the user before calling it
             svc = core.find(core.inventory(c), str(body.get("id") or ""))
+            core.guard(state, svc)
             core.deploy(c, svc, "Harness Maxxing", again=bool(body.get("again")))
             return {"started": svc["id"]}
         if path == "deployments" and method == "GET":
@@ -49,6 +61,13 @@ def handle(ctx, method, path, query, body):
                 return 404, {"error": "not_found", "message": "no such deployment"}
             return {"deployment": dep["id"], "log": core.log(dep, 300)}
     except core.DokployError as e:
-        status = {"not_connected": 409, "no_key": 409, "key_changed": 409, "not_found": 404}.get(e.code, 422)
+        status = {
+            "not_connected": 409,
+            "no_key": 409,
+            "key_changed": 409,
+            "protected": 409,
+            "bad_settings": 409,
+            "not_found": 404,
+        }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}
     return 404, {"error": "not_found", "message": f"{method} {path}"}

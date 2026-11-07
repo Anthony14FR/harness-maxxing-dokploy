@@ -5,7 +5,10 @@ for [Harness Maxxing](https://github.com/makushingu/harness-maxxing) that connec
 [Dokploy](https://dokploy.com):
 
 - **A Dokploy page** in Harness: your projects, applications, compose stacks, databases and domains with their
-  state, the last deployment log, and **Deploy** / **Rebuild** buttons that ask you first.
+  state, the last deployment log, and **Deploy** / **Rebuild** buttons that ask you first (type the service name
+  when the site can be down for a few seconds).
+- **Protected services**: mark a production service read-only on the page; the page and `dokploy.py` then refuse to
+  deploy, rebuild it or add a domain to it, and only the page can lift it.
 - **A skill for Claude sessions**: Claude lists what runs, reads why a deployment failed, deploys, adds a domain or
   creates an app from a git repository, and asks you before every change.
 
@@ -62,7 +65,7 @@ Reload**.
   `ctx.secret()`; the session script reads it with `maxxing keys get` inside its own process, for each call. It is
   never written in this folder, never printed, and never put in the environment of sessions.
 - The extension's state folder (`/var/lib/claude-maxxing/extensions/dokploy/settings.json`, root only) keeps the
-  Dokploy address and a fingerprint of the key it was checked with, never the key. A key changed in Keys is not
+  Dokploy address, a fingerprint of the key it was checked with (never the key) and the protected services. A key changed in Keys is not
   used until you check it again on the page.
 - The script warns when `DOKPLOY_API_KEY` is exposed to sessions.
 - Claude sessions run as root on a standard install: these rules keep the key out of their environment, prompts
@@ -85,6 +88,9 @@ python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] 
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build T] --yes
 ```
 
+A protected service refuses deploy, redeploy and domain add, even with `--yes`, and the script has no command to lift
+the protection. Like `--yes`, it guards the page and the commands Claude is told to use; it is not a lock against a
+root session set on going around it.
 Every write needs `--yes`, which the skill tells Claude to add only after you agreed; without it the command stops
 (exit code 3) and changes nothing. That is how Claude is told to work, not a lock: review what it proposes. Values
 passed on to Dokploy (git URL, branch, names, host, port, path) are validated first. Deployment logs are read from

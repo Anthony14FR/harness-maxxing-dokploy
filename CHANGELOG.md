@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Protected services** (#1): mark a service read-only on the page; the page and `dokploy.py` refuse to deploy,
+  rebuild it or add a domain to it, and only the page can lift it (kept across disconnect / reconnect; an
+  unreadable settings file refuses every write instead of opening them).
+- **Safer confirmation** (#1): the page shows what a deploy will do (a few seconds of downtime for a compose stack or
+  an app that is not start-first, nothing rebuilt without a git source) and asks to type the service name when the
+  site can go down; `dokploy.py` puts the same warnings in its question.
+
 ## 1.0.0 - 2026-11-07
 
 - Dokploy page: connect with the key from Settings -> Keys, see projects, apps, compose stacks, databases and
