@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-11-07
 
 - **The skill stays up to date** (#4): `dokploy.py install-skill` and an **Install the skill for sessions** button copy
   it to the workspace; the page and `dokploy.py status` say when that copy is missing or older than the extension.

@@ -18,6 +18,7 @@ const T = {
       downtime: "Its containers are stopped and started again: the site can be down for a few seconds.",
       no_rebuild: "It has no git source: nothing is rebuilt, the same image starts again.",
       unknown: "Dokploy did not give its details: assume the site can go down.",
+      stopped: "The site stays down until you start it again.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
@@ -45,6 +46,7 @@ const T = {
       downtime: "Ses conteneurs sont arrêtés puis relancés : le site peut être coupé quelques secondes.",
       no_rebuild: "Il n’a pas de source git : rien n’est reconstruit, la même image redémarre.",
       unknown: "Dokploy n’a pas donné ses détails : considérez que le site peut être coupé.",
+      stopped: "Le site reste coupé jusqu’à ce que vous le redémarriez.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
@@ -112,7 +114,7 @@ export function mount(el, ctx) {
 
   // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
   function confirmPanel(svc, question, run, close, risks = svc.risks || ["unknown"]) {
-    const typed = risks.includes("downtime") || risks.includes("unknown");
+    const typed = ["downtime", "unknown", "stopped"].some((r) => risks.includes(r));
     const name = String(svc.name).trim();
     const input = typed ? h("input", { class: "ui-input", placeholder: t.typeName(name), "aria-label": t.typeName(name) }) : null;
     const ok = h("button", { class: "ui-btn ui-danger ui-sm", disabled: typed }, t.confirm);
@@ -168,7 +170,7 @@ export function mount(el, ctx) {
           setTimeout(() => { if (alive) load(); }, 4000);  // let the containers move before reading them again
         } catch (e) { fail(e); }
       };
-      if (action === "stop") return slot.replaceChildren(confirmPanel(svc, t.confirmStop(svc.name), go, close, ["downtime"]));
+      if (action === "stop") return slot.replaceChildren(confirmPanel(svc, t.confirmStop(svc.name), go, close, ["stopped"]));
       if (action === "start") return slot.replaceChildren(confirmPanel(svc, t.confirmStart(svc.name), go, close, []));
       try {  // rollback: say which deployment it goes back to before asking
         const d = await ctx.api(`rollback?id=${encodeURIComponent(svc.id)}`);
