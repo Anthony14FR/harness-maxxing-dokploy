@@ -2,6 +2,7 @@
 """Deploy through Dokploy from a Claude session; the key is read from Harness Keys for each call, never printed.
 
     dokploy.py status                                         also says when the sessions' skill copy is out of date
+    dokploy.py updates [--json]                               what can be updated (read-only: the user updates it)
     dokploy.py install-skill                                  copy skill/dokploy to <workspace>/.claude/skills/
     dokploy.py list [--json]                                  projects, apps, compose stacks, databases, domains
     dokploy.py environments [--json]                          where `app create` can put an app
@@ -87,6 +88,7 @@ def parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("status", help="connected or not, and the address")
     sub.add_parser("install-skill", help="copy the skill to the workspace, where Claude Code reads it")
+    sub.add_parser("updates", help="what can be updated (read-only)").add_argument("--json", action="store_true")
     for name, what in (
         ("list", "projects, apps, stacks, databases and their domains"),
         ("environments", "projects and environments, with the ids app create needs"),
@@ -170,6 +172,24 @@ def run(a: argparse.Namespace) -> int:
     st = state_dir()
     if a.action == "install-skill":
         print(f"skill copied to {core.install_skill(workspace())}")
+        return 0
+    if a.action == "updates":
+        res = {"extension": core.ext_check(core.EXT_DIR)}
+        try:
+            res["dokploy"] = core.dokploy_check(core.client(st, secret))
+        except core.DokployError as e:
+            res["dokploy"] = {"error": e.code, "message": e.message}
+        if a.json:
+            print(json.dumps(res, indent=2))
+            return 0
+        x, d = res["extension"], res["dokploy"]
+        blockers = f" ({', '.join(x['blockers'])})" if x["blockers"] else ""
+        print(f"extension  {x['current']} -> {x['new'] or '-'}  {x['state']}{blockers}")
+        print(
+            f"dokploy    {d.get('current') or '-'} -> {d.get('latest') or '-'}  "
+            f"{d.get('message') or ('available' if d.get('available') else 'up_to_date')}"
+        )
+        print("updates are the user's: they run them on the Dokploy page in Harness")
         return 0
     if a.action == "status":
         sk = core.skill_state(workspace())

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -18,6 +19,16 @@ def _core():
 
 
 core = _core()
+
+
+def _supported_api() -> int:
+    """The extension contract this Harness runs (1 when it does not say)."""
+    try:
+        from maxxing.extensions import EXT_API
+
+        return int(EXT_API)
+    except Exception:  # noqa: BLE001 - outside Harness (tests) or an older layout
+        return 1
 
 
 def handle(ctx, method, path, query, body):
@@ -38,6 +49,24 @@ def handle(ctx, method, path, query, body):
         if path == "protect" and method == "POST" and not body.get("on"):  # lifting works offline, and for gone ids
             sid = str(body.get("id") or "")
             return {"id": sid, "protected": sid in core.set_protected(state, sid, False)}
+        if path == "updates" and method == "GET":  # a check only: nothing changes
+            ext = core.ext_check(core.EXT_DIR, _supported_api())
+            try:
+                dok = core.dokploy_check(core.client(state, secret))
+            except core.DokployError as e:
+                dok = {"error": e.code, "message": e.message}
+            return {"extension": ext, "dokploy": dok, "harness": "/settings/updates"}
+        if path == "update" and method == "POST":  # after the user confirmed exactly this version
+            what, to = body.get("what"), str(body.get("to") or "")
+            if what == "extension":
+                chk = core.ext_update(core.EXT_DIR, _supported_api(), to)
+                if ctx.get("workspace"):
+                    with contextlib.suppress(core.DokployError):  # the page still offers the skill button
+                        core.install_skill(ctx["workspace"])
+                return {"updated": "extension", "version": chk["new"]}
+            if what == "dokploy":
+                return {"updated": "dokploy", "version": core.dokploy_update(core.client(state, secret), to)["latest"]}
+            return 400, {"error": "bad_target", "message": "what must be extension or dokploy"}
         c = core.client(state, secret)
         if path == "services" and method == "GET":
             prot = core.protected(state)
@@ -96,6 +125,9 @@ def handle(ctx, method, path, query, body):
             "target_changed": 409,
             "skill_linked": 409,
             "skill_failed": 409,
+            "update_refused": 409,
+            "update_failed": 409,
+            "up_to_date": 409,
             "not_found": 404,
         }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}

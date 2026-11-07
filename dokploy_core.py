@@ -10,6 +10,7 @@ import ipaddress
 import json
 import os
 import re
+import subprocess
 import tempfile
 import urllib.error
 import urllib.parse
@@ -275,6 +276,141 @@ def install_skill(workspace: str | Path) -> Path:
     except OSError as e:
         raise DokployError("skill_failed", f"cannot copy the skill to {dest}: {e.strerror or e}") from None
     return dest
+
+
+# ---- updates: this extension (git) and Dokploy -----------------------------------------------------------
+EXT_DIR = Path(__file__).resolve().parent
+GITHUB_API = "https://api.github.com"
+GITHUB_RE = re.compile(r"github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$")
+CI_OK = ("success", "skipped", "neutral")
+
+
+def _git(ext_dir: Path, *args: str, timeout: int = 20) -> tuple[int, str]:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(ext_dir), *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return r.returncode, r.stdout.strip()
+
+
+def ci_state(remote_url: str, sha: str) -> str:
+    """success, failure, pending or unknown: the GitHub checks of `sha` (no token: public repositories)."""
+    m = GITHUB_RE.search(remote_url or "")
+    if not m or not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return "unknown"
+    base = os.environ.get("DOKPLOY_EXT_GITHUB_API") or GITHUB_API
+    req = urllib.request.Request(
+        f"{base}/repos/{m[1]}/{m[2]}/commits/{sha}/check-runs",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "harness-maxxing-dokploy"},
+    )
+    try:
+        with _OPENER.open(req, timeout=10) as r:
+            runs = json.loads(r.read()).get("check_runs") or []
+    except (urllib.error.URLError, OSError, ValueError, AttributeError):
+        return "unknown"
+    if not runs:
+        return "unknown"
+    if any(x.get("status") != "completed" for x in runs):
+        return "pending"
+    return "success" if all(x.get("conclusion") in CI_OK for x in runs) else "failure"
+
+
+def _changes(old: str, new_changelog: str) -> str:
+    """The CHANGELOG sections above the installed version's heading."""
+    out = []
+    for line in new_changelog.splitlines():
+        if line.startswith("## ") and line[3:].split(" ")[0] == old:
+            break
+        out.append(line)
+    return "\n".join(x for x in out if not x.startswith("# ")).strip()[:4000]
+
+
+def ext_check(ext_dir: Path = EXT_DIR, supported_api: int = 1, fetch: bool = True) -> dict:
+    """What updating this extension would do, and why it is refused: never changes the folder."""
+    cur = json.loads((ext_dir / "manifest.json").read_text())
+    out: dict[str, Any] = {
+        "current": cur.get("version"),
+        "new": None,
+        "commit": None,
+        "changes": "",
+        "ci": None,
+        "blockers": [],
+    }
+    if _git(ext_dir, "rev-parse", "--is-inside-work-tree")[1] != "true":
+        return {**out, "state": "not_git"}  # installed by copy: update it the way it was installed
+    if fetch and _git(ext_dir, "fetch", "--quiet", timeout=25)[0] != 0:
+        return {**out, "state": "unreachable"}
+    rc, up = _git(ext_dir, "rev-parse", "--abbrev-ref", "@{u}")
+    if rc != 0:
+        return {**out, "state": "no_upstream"}
+    head, new = _git(ext_dir, "rev-parse", "HEAD")[1], _git(ext_dir, "rev-parse", "@{u}")[1]
+    if head == new:
+        return {**out, "state": "up_to_date", "new": cur.get("version"), "commit": new}
+    try:
+        man = json.loads(_git(ext_dir, "show", "@{u}:manifest.json")[1])
+    except ValueError:
+        man = {}
+    blockers = []
+    if _git(ext_dir, "status", "--porcelain", "--untracked-files=no")[1]:
+        blockers.append("local_changes")
+    if _git(ext_dir, "merge-base", "--is-ancestor", "HEAD", "@{u}")[0] != 0:
+        blockers.append("not_fast_forward")
+    if int(man.get("api") or 1) > supported_api:
+        blockers.append("needs_newer_harness")
+    if man.get("id") != cur.get("id"):
+        blockers.append("not_this_extension")
+    ci = ci_state(_git(ext_dir, "remote", "get-url", up.split("/")[0])[1], new)
+    if ci != "success":
+        blockers.append(f"ci_{ci}")
+    return {
+        **out,
+        "state": "blocked" if blockers else "available",
+        "new": man.get("version"),
+        "commit": new,
+        "changes": _changes(str(cur.get("version")), _git(ext_dir, "show", "@{u}:CHANGELOG.md")[1]),
+        "ci": ci,
+        "blockers": blockers,
+    }
+
+
+def ext_update(ext_dir: Path, supported_api: int, confirmed: str) -> dict:
+    """Fast-forwards to the commit the user confirmed, only when the check still says it is clean."""
+    chk = ext_check(ext_dir, supported_api)
+    if chk["state"] != "available":
+        raise DokployError("update_refused", f"this update is not clean any more ({chk['state']}): check again")
+    if chk["commit"] != confirmed:
+        raise DokployError("target_changed", "a newer version appeared since you checked: check again")
+    if _git(ext_dir, "merge", "--ff-only", "--quiet", confirmed, timeout=30)[0] != 0:
+        raise DokployError("update_failed", "git could not fast-forward the extension folder")
+    return chk
+
+
+def dokploy_check(c: Client) -> dict:
+    v = c.get("settings.getDokployVersion")
+    d = c.post("settings.getUpdateData", {}) or {}
+    return {
+        "current": v if isinstance(v, str) else None,
+        "latest": d.get("latestVersion"),
+        "available": bool(d.get("updateAvailable")),
+    }
+
+
+def dokploy_update(c: Client, confirmed: str) -> dict:
+    """Dokploy updates itself (its own page is away about two minutes; Traefik and the apps keep running)."""
+    chk = dokploy_check(c)
+    if not chk["available"]:
+        raise DokployError("up_to_date", "Dokploy is already up to date")
+    if chk["latest"] != confirmed:
+        raise DokployError("target_changed", "a newer Dokploy appeared since you checked: check again")
+    c.post("settings.updateServer", {})
+    return chk
 
 
 # ---- HTTP ----------------------------------------------------------------------------------------------------

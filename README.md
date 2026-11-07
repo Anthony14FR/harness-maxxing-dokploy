@@ -50,14 +50,24 @@ behind Dokploy's Traefik with `maxxing proxy`).
    `/root/maxxing/.claude/skills/dokploy/`. Other files in that folder are left alone, and a link to another folder
    is refused rather than followed.
 
-To update:
+## Update
+
+On the Dokploy page, **Updates -> Check for updates** shows, for each part, what is installed and what is new:
+
+- **This extension**: **Update** is offered only when it is clean: no file of the extension changed here, the new
+  version follows the installed one (fast-forward), its tests passed on GitHub, and it runs with your Harness. It then
+  pulls the new version, refreshes the sessions' skill, and the page reloads. Otherwise it says why.
+- **Dokploy**: its version and the latest one; **Update** asks you to type `dokploy`. Measured on a test server
+  (v0.30.10 -> v0.31.0): the sites stay up (Traefik and the apps are not restarted), Dokploy's own page and API are
+  away for about two minutes.
+- **Harness Maxxing** updates itself, with its own checks and rollback, in **Settings -> Updates** (linked there).
+
+Each update runs only the exact version you confirmed: if a newer one appeared meanwhile, it asks you to check again.
+By hand, the same as the extension's button:
 
 ```bash
-git -C /root/maxxing/extensions/dokploy pull && python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
+git -C /root/maxxing/extensions/dokploy pull --ff-only && python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
 ```
-
-then **Settings -> Extensions -> Reload**. The page and `dokploy.py status` say when the sessions' copy of the
-skill is missing or older than the extension.
 
 ## What it sends, and where
 
@@ -67,6 +77,11 @@ skill is missing or older than the extension.
   only after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` / `stop` /
   `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
+- **For updates, only when you click Check or Update**: `settings.getDokployVersion`, `settings.getUpdateData` and,
+  after you confirm, `settings.updateServer` to Dokploy; `git fetch` / `git merge --ff-only` of this folder from the
+  repository it was cloned from; GitHub's public API (`GET /repos/<owner>/<repo>/commits/<sha>/check-runs`, no token)
+  to see that the new version passed its tests. Updating runs new code of this extension as root, the same trust as
+  the first `git clone`.
 - Nothing else, to nobody else: no telemetry, no other host. Redirects are not followed, so the key is never sent to
   another address.
 - Plain `http://` is accepted only for this machine, a private network or a Tailscale address; anything else needs
@@ -92,6 +107,7 @@ The skill teaches Claude these commands (`skill/dokploy/SKILL.md`):
 D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status
 python3 $D install-skill
+python3 $D updates [--json]
 python3 $D list [--json]
 python3 $D environments [--json]
 python3 $D deployments APP [--json]
