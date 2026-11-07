@@ -113,6 +113,7 @@ class FakeDokploy:
         self.calls: list[tuple[str, str, dict]] = []
         self.logs = logs
         self.broken: set[str] = set()  # procedures that answer 500
+        self.dokploy_version, self.dokploy_latest = "v0.30.10", "v0.31.0"
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -166,6 +167,15 @@ class FakeDokploy:
                 {"name": f"{data['appName']}_web.1", "state": "shutdown", "currentState": "Shutdown 2 hours ago"},
                 {"name": f"{data['appName']}_worker.1", "state": "shutdown", "currentState": "Failed 1 minute ago"},
             ]
+        if proc == "settings.getDokployVersion":
+            return 200, self.dokploy_version
+        if proc == "settings.getUpdateData":
+            return 200, {
+                "latestVersion": self.dokploy_latest,
+                "updateAvailable": self.dokploy_latest != self.dokploy_version,
+            }
+        if proc == "settings.updateServer":
+            return 200, True
         if proc == "application.create":
             return 200, {"applicationId": "new1", "name": data["name"]}
         if proc == "deployment.all":

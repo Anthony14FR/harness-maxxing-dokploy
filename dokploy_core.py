@@ -10,7 +10,9 @@ import ipaddress
 import json
 import os
 import re
+import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -210,7 +212,7 @@ def risks(svc: dict) -> list[str]:
     return out
 
 
-def client(state_dir: str | Path, secret: Secret) -> Client:
+def client(state_dir: str | Path, secret: Secret, timeout: float = TIMEOUT) -> Client:
     s = load_settings(state_dir)
     if not s.get("url"):
         raise DokployError("not_connected", "Dokploy is not connected: open the Dokploy page in Harness")
@@ -219,7 +221,7 @@ def client(state_dir: str | Path, secret: Secret) -> Client:
         raise DokployError("no_key", f"{KEY} is missing in Settings -> Keys")
     if s.get("key") != fingerprint(key):
         raise DokployError("key_changed", f"{KEY} changed: check it again on the Dokploy page")
-    return Client(s["url"], key)
+    return Client(s["url"], key, timeout)
 
 
 # ---- the skill sessions read ---------------------------------------------------------------------------------
@@ -277,6 +279,239 @@ def install_skill(workspace: str | Path) -> Path:
     return dest
 
 
+# ---- updates: this extension (git) and Dokploy -----------------------------------------------------------
+EXT_DIR = Path(__file__).resolve().parent
+GITHUB_API = "https://api.github.com"
+GITHUB_RE = re.compile(
+    r"^(?:https://(?:[^@/]+@)?|ssh://git@|git@)github\.com[:/]([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$"
+)
+CHECK_BUDGET = 22  # seconds for a whole check: Harness stops an extension request at 30
+DOKPLOY_UPDATE_WAIT = 300  # seconds during which a started Dokploy update is not started again
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}  # no prompt (no tty either), messages in English
+
+
+class _GitTimeout(Exception):
+    pass
+
+
+def _git(ext_dir: Path, *args: str, timeout: float = 5, deadline: float | None = None) -> tuple[int, str, str]:
+    """(rc, stdout, stderr) of git in its own session, killed whole on timeout: a stuck helper never hangs Harness."""
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            return 124, "", "timeout"
+    try:
+        proc = subprocess.Popen(
+            ["git", "-C", str(ext_dir), *args],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+            env={**os.environ, **GIT_ENV},
+        )
+    except OSError:
+        return 127, "", "git not found"
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            os.killpg(proc.pid, 9)
+        try:
+            proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired:  # a helper that left the group still holds the pipes
+            for f in (proc.stdout, proc.stderr):
+                with contextlib.suppress(OSError):
+                    f.close()
+        return 124, "", "timeout"
+    return proc.returncode, (out or "").strip(), (err or "").strip()
+
+
+def _g(ext_dir: Path, deadline: float, *args: str, timeout: float = 5) -> tuple[int, str, str]:
+    """_git for ext_check: a timeout ends the whole check as `timeout`, never as a misleading state."""
+    r = _git(ext_dir, *args, timeout=timeout, deadline=deadline)
+    if r[0] == 124:
+        raise _GitTimeout
+    return r
+
+
+def ci_state(remote_url: str, sha: str, deadline: float | None = None) -> str:
+    """success, failure, pending, rate_limited or unknown: GitHub checks of `sha` (public API, no token)."""
+    m = GITHUB_RE.search(remote_url or "")
+    if not m or not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        return "unknown"
+    base = os.environ.get("DOKPLOY_EXT_GITHUB_API") or GITHUB_API
+    req = urllib.request.Request(
+        f"{base}/repos/{m[1]}/{m[2]}/commits/{sha}/check-runs?per_page=100",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "harness-maxxing-dokploy"},
+    )
+    wait = 8 if deadline is None else min(8, deadline - time.monotonic())
+    if wait <= 0:
+        return "unknown"
+    try:
+        with _OPENER.open(req, timeout=wait) as r:
+            data = json.loads(r.read(1_000_000))
+    except urllib.error.HTTPError as e:
+        return "rate_limited" if e.code in (403, 429) else "unknown"
+    except (urllib.error.URLError, OSError, ValueError):
+        return "unknown"
+    runs = [x for x in (data.get("check_runs") or []) if isinstance(x, dict)] if isinstance(data, dict) else []
+    if not runs or data.get("total_count", len(runs)) != len(runs):
+        return "unknown"  # none, or more than one page: not enough to call it green
+    if any(x.get("status") != "completed" for x in runs):
+        return "pending"
+    if any(x.get("conclusion") not in ("success", "skipped", "neutral") for x in runs):
+        return "failure"
+    return "success" if any(x.get("conclusion") == "success" for x in runs) else "unknown"
+
+
+def _changes(old: str, new_changelog: str) -> str:
+    """The CHANGELOG sections above the installed version's heading."""
+    out = []
+    for line in new_changelog.splitlines():
+        if line.startswith("## ") and line[3:].split(" ")[0] == old:
+            break
+        out.append(line)
+    return "\n".join(x for x in out if not x.startswith("# ")).strip()[:4000]
+
+
+def _manifest(text: str) -> dict:
+    try:
+        m = json.loads(text)
+    except ValueError:
+        return {}
+    return m if isinstance(m, dict) else {}
+
+
+def ext_check(
+    ext_dir: Path = EXT_DIR, supported_api: int = 1, fetch: bool = True, budget: float = CHECK_BUDGET
+) -> dict:
+    """What updating this extension would do, and why it is refused: never changes the folder."""
+    deadline = time.monotonic() + budget
+    try:
+        cur = _manifest((ext_dir / "manifest.json").read_text())
+    except OSError:
+        cur = {}
+    out: dict[str, Any] = {
+        "current": cur.get("version"),
+        "new": None,
+        "commit": None,
+        "changes": "",
+        "ci": None,
+        "blockers": [],
+    }
+    if not cur.get("id"):
+        return {**out, "state": "bad_manifest"}
+    try:
+        return {**out, **_ext_check(ext_dir, supported_api, fetch, deadline, cur)}
+    except _GitTimeout:
+        return {**out, "state": "timeout"}
+
+
+def _ext_check(ext_dir: Path, supported_api: int, fetch: bool, deadline: float, cur: dict) -> dict:
+    rc, top, err = _g(ext_dir, deadline, "rev-parse", "--show-toplevel")
+    if "dubious ownership" in err:
+        return {"state": "dubious_owner"}  # git refuses a folder owned by another user
+    if rc != 0 or Path(top).resolve() != ext_dir.resolve():
+        return {"state": "not_git"}  # installed by copy (or inside another repository): update it by hand
+    if fetch and _g(ext_dir, deadline, "fetch", "--quiet", timeout=15)[0] != 0:
+        return {"state": "unreachable"}
+    branch = _g(ext_dir, deadline, "symbolic-ref", "--quiet", "--short", "HEAD")[1]
+    remote = _g(ext_dir, deadline, "config", "--get", f"branch.{branch}.remote")[1] if branch else ""
+    rc, new, _ = _g(ext_dir, deadline, "rev-parse", "--verify", "--quiet", "@{u}")
+    if rc != 0 or not new or not remote or remote.startswith("-") or remote == ".":
+        return {"state": "no_upstream"}
+    head = _g(ext_dir, deadline, "rev-parse", "HEAD")[1]
+    if head == new:
+        return {"state": "up_to_date", "new": cur.get("version"), "commit": new}
+    if _g(ext_dir, deadline, "merge-base", "--is-ancestor", "@{u}", "HEAD")[0] == 0:
+        return {"state": "ahead", "commit": head}  # a newer checkout than the repository: nothing to fetch
+    man = _manifest(_g(ext_dir, deadline, "show", "@{u}:manifest.json")[1])
+    api = man.get("api", 1)
+    blockers = []
+    if _g(ext_dir, deadline, "status", "--porcelain", "--untracked-files=no")[1]:
+        blockers.append("local_changes")
+    if _g(ext_dir, deadline, "merge-base", "--is-ancestor", "HEAD", "@{u}")[0] != 0:
+        blockers.append("not_fast_forward")
+    if man.get("id") != cur.get("id"):
+        blockers.append("not_this_extension")
+    elif not isinstance(api, int) or isinstance(api, bool):
+        blockers.append("bad_manifest")
+    elif api > supported_api:
+        blockers.append("needs_newer_harness")
+    url = _g(ext_dir, deadline, "remote", "get-url", remote)[1]
+    changes = _changes(str(cur.get("version")), _g(ext_dir, deadline, "show", "@{u}:CHANGELOG.md")[1])
+    ci = ci_state(url, new, deadline)
+    if ci != "success":
+        blockers.append(f"ci_{ci}")
+    return {
+        "state": "blocked" if blockers else "available",
+        "new": man.get("version"),
+        "commit": new,
+        "changes": changes,
+        "ci": ci,
+        "blockers": blockers,
+    }
+
+
+def ext_update(ext_dir: Path, supported_api: int, confirmed: str) -> dict:
+    """Fast-forwards to the commit the user confirmed, only when the check (on what was fetched) still allows it."""
+    chk = ext_check(ext_dir, supported_api, fetch=False, budget=8)  # same @{u} as the user saw: no second fetch
+    if chk["state"] != "available":
+        raise DokployError("update_refused", f"this update is not clean any more ({chk['state']}): check again")
+    if chk["commit"] != confirmed:
+        raise DokployError("target_changed", "a newer version appeared since you checked: check again")
+    rc, _, err = _git(ext_dir, "merge", "--ff-only", "--quiet", confirmed, timeout=15)
+    if rc == 124:
+        raise DokployError("update_failed", f"git took too long: check `git -C {ext_dir} status`, then update by hand")
+    if rc != 0:
+        raise DokployError("update_failed", f"git could not fast-forward the extension folder: {err[:200]}")
+    return chk
+
+
+def dokploy_check(c: Client) -> dict:
+    v = c.get("settings.getDokployVersion")
+    d = c.post("settings.getUpdateData", {})
+    d = d if isinstance(d, dict) else {}
+    return {
+        "current": v if isinstance(v, str) else None,
+        "latest": d.get("latestVersion"),
+        "available": bool(d.get("updateAvailable")),
+    }
+
+
+def dokploy_update(c: Client, confirmed: str, state_dir: str | Path) -> dict:
+    """Dokploy updates itself to its latest release; its page is away about two minutes, Traefik and apps run on."""
+    marker = Path(state_dir) / "dokploy-update-started"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(FileNotFoundError):
+        if not 0 <= time.time() - marker.stat().st_mtime < DOKPLOY_UPDATE_WAIT:
+            marker.unlink()  # old, or dated in the future by a clock change
+    try:
+        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))  # one update at a time, atomically
+    except FileExistsError:
+        raise DokployError(
+            "update_in_progress", "a Dokploy update was started a few minutes ago: wait for it"
+        ) from None
+    started = False
+    try:
+        chk = dokploy_check(c)
+        if not chk["available"]:
+            raise DokployError("up_to_date", "Dokploy is already up to date")
+        if chk["latest"] != confirmed:
+            raise DokployError("target_changed", "a newer Dokploy appeared since you checked: check again")
+        try:
+            c.post("settings.updateServer", {})
+        except DokployError as e:
+            if e.code != "unreachable":
+                raise
+        started = True  # also when the request dropped: Dokploy restarts under it
+    finally:
+        if not started:
+            marker.unlink(missing_ok=True)  # nothing started: a retry must not wait five minutes
+    return chk
+
+
 # ---- HTTP ----------------------------------------------------------------------------------------------------
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a: Any, **k: Any) -> None:
@@ -287,9 +522,10 @@ _OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 class Client:
-    def __init__(self, base: str, key: str):
+    def __init__(self, base: str, key: str, timeout: float = TIMEOUT):
         self.base = base.rstrip("/") + "/api/"
         self.key = key
+        self.timeout = timeout
 
     def _do(self, method: str, proc: str, params: dict | None = None, body: dict | None = None) -> Any:
         url = self.base + proc + ("?" + urllib.parse.urlencode(params) if params else "")
@@ -306,7 +542,7 @@ class Client:
             },
         )
         try:
-            with _OPENER.open(req, timeout=TIMEOUT) as r:
+            with _OPENER.open(req, timeout=self.timeout) as r:
                 raw = r.read()
         except urllib.error.HTTPError as e:
             raise self._error(proc, e.code, e.read()[:2000]) from None

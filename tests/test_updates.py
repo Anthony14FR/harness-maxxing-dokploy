@@ -1,0 +1,364 @@
+import json
+import os
+import subprocess
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+from conftest import KEY, load
+
+GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "init.defaultBranch=main"]
+
+
+def git(cwd, *args):
+    return subprocess.run([*GIT, "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def release(src, version, api=1, ext_id="dokploy"):
+    (src / "manifest.json").write_text(json.dumps({"id": ext_id, "version": version, "api": api}))
+    old = (src / "CHANGELOG.md").read_text() if (src / "CHANGELOG.md").exists() else "# Changelog\n"
+    head, _, rest = old.partition("\n")
+    (src / "CHANGELOG.md").write_text(f"{head}\n\n## {version} - 2026-11-07\n\n- change of {version}\n{rest}")
+    git(src, "add", "-A")
+    git(src, "commit", "-qm", f"release {version}")
+    git(src, "push", "-q", "origin", "main")
+    return git(src, "rev-parse", "HEAD")
+
+
+@pytest.fixture(autouse=True)
+def _plain_git(monkeypatch, tmp_path):
+    """No global or system git config (signing, hooks, aliases) changes what these tests do."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+@pytest.fixture
+def repo(tmp_path, core, monkeypatch):
+    """origin.git, a maintainer's clone (src) and the installed extension (ext), all local."""
+    origin, src, ext = tmp_path / "origin.git", tmp_path / "src", tmp_path / "ext"
+    subprocess.run([*GIT, "init", "-q", "--bare", str(origin)], check=True)
+    subprocess.run([*GIT, "clone", "-q", str(origin), str(src)], check=True, capture_output=True)
+    release(src, "1.0.0")
+    subprocess.run([*GIT, "clone", "-q", str(origin), str(ext)], check=True)
+    monkeypatch.setattr(core, "ci_state", lambda *a: "success")
+    return {"origin": origin, "src": src, "ext": ext}
+
+
+def test_up_to_date_then_a_clean_update(core, repo):
+    assert core.ext_check(repo["ext"])["state"] == "up_to_date"
+    sha = release(repo["src"], "1.1.0")
+    chk = core.ext_check(repo["ext"])
+    assert (chk["state"], chk["current"], chk["new"], chk["commit"], chk["ci"]) == (
+        "available",
+        "1.0.0",
+        "1.1.0",
+        sha,
+        "success",
+    )
+    assert "change of 1.1.0" in chk["changes"] and "1.0.0" not in chk["changes"]
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, "0" * 40)
+    assert e.value.code == "target_changed"
+    core.ext_update(repo["ext"], 1, sha)
+    assert json.loads((repo["ext"] / "manifest.json").read_text())["version"] == "1.1.0"
+    assert core.ext_check(repo["ext"])["state"] == "up_to_date"
+
+
+@pytest.mark.parametrize(
+    "setup, blocker",
+    [
+        ("local", "local_changes"),
+        ("api", "needs_newer_harness"),
+        ("other", "not_this_extension"),
+        ("ci", "ci_failure"),
+        ("diverged", "not_fast_forward"),
+    ],
+)
+def test_unclean_updates_are_refused(core, repo, monkeypatch, setup, blocker):
+    if setup == "local":
+        (repo["ext"] / "manifest.json").write_text('{"id": "dokploy", "version": "1.0.0-mine"}')
+    if setup == "diverged":
+        (repo["ext"] / "notes.md").write_text("x")
+        git(repo["ext"], "add", "notes.md")
+        git(repo["ext"], "commit", "-qm", "local commit")
+    sha = release(
+        repo["src"], "2.0.0", api=2 if setup == "api" else 1, ext_id="other" if setup == "other" else "dokploy"
+    )
+    if setup == "ci":
+        monkeypatch.setattr(core, "ci_state", lambda *a: "failure")
+    chk = core.ext_check(repo["ext"])
+    assert chk["state"] == "blocked" and blocker in chk["blockers"]
+    before = git(repo["ext"], "rev-parse", "HEAD")
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, sha)
+    assert e.value.code == "update_refused" and git(repo["ext"], "rev-parse", "HEAD") == before
+
+
+def test_a_checkout_newer_than_its_repository_is_not_downgraded(core, repo):
+    (repo["ext"] / "notes.md").write_text("x")
+    git(repo["ext"], "add", "notes.md")
+    git(repo["ext"], "commit", "-qm", "work in progress")
+    assert core.ext_check(repo["ext"])["state"] == "ahead"
+
+
+def test_states_without_a_usable_repository(core, repo, tmp_path):
+    plain = tmp_path / "copied"
+    plain.mkdir()
+    (plain / "manifest.json").write_text('{"id": "dokploy", "version": "1.0.0"}')
+    assert core.ext_check(plain)["state"] == "not_git"
+    lone = tmp_path / "lone"
+    subprocess.run([*GIT, "init", "-q", str(lone)], check=True)
+    (lone / "manifest.json").write_text('{"id": "dokploy", "version": "1.0.0"}')
+    assert core.ext_check(lone, fetch=False)["state"] == "no_upstream"
+    import shutil
+
+    shutil.rmtree(repo["origin"])
+    assert core.ext_check(repo["ext"])["state"] == "unreachable"
+
+
+@pytest.fixture
+def github(monkeypatch):
+    runs = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            sha = self.path.split("/commits/")[1].split("/")[0]
+            got = runs.get(sha, [])
+            data = json.dumps(got if isinstance(got, dict) else {"total_count": len(got), "check_runs": got}).encode()
+            self.send_response(runs.get("status", 200))
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("DOKPLOY_EXT_GITHUB_API", f"http://127.0.0.1:{srv.server_address[1]}")
+    yield runs
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_ci_state_reads_github_checks(core, github):
+    url = "https://github.com/acme/harness-maxxing-dokploy.git"
+    ok, wip, bad, none = "a" * 40, "b" * 40, "c" * 40, "d" * 40
+    github[ok] = [{"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "skipped"}]
+    github[wip] = [{"status": "in_progress", "conclusion": None}]
+    github[bad] = [{"status": "completed", "conclusion": "success"}, {"status": "completed", "conclusion": "failure"}]
+    assert [core.ci_state(url, x) for x in (ok, wip, bad, none)] == ["success", "pending", "failure", "unknown"]
+    assert core.ci_state("git@github.com:acme/harness-maxxing-dokploy.git", ok) == "success"
+    assert core.ci_state("/srv/git/ext.git", ok) == "unknown"  # not on GitHub: cannot be checked
+    assert core.ci_state(url, "not-a-sha") == "unknown"
+
+
+def test_dokploy_update_only_to_the_confirmed_version(core, fake, state):
+    c = core.Client(fake.url, KEY)
+    assert core.dokploy_check(c) == {"current": "v0.30.10", "latest": "v0.31.0", "available": True}
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(c, "v0.30.99", state)
+    assert e.value.code == "target_changed" and not [w for w in fake.writes() if w[1] == "settings.updateServer"]
+    core.dokploy_update(c, "v0.31.0", state)
+    assert [w[1] for w in fake.writes()][-1] == "settings.updateServer"
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(c, "v0.31.0", state)  # a second click while Dokploy restarts
+    assert e.value.code == "update_in_progress"
+    (state / "dokploy-update-started").unlink()
+    fake.dokploy_latest = "v0.30.10"
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(c, "v0.31.0", state)
+    assert e.value.code == "up_to_date"
+
+
+def test_a_dokploy_that_drops_the_request_while_restarting_did_start(core, fake, state):
+    c = core.Client(fake.url, KEY)
+    fake.broken.add("settings.updateServer")
+    with pytest.raises(core.DokployError):
+        core.dokploy_update(c, "v0.31.0", state)  # a real error: not marked as started
+    assert not (state / "dokploy-update-started").exists()
+    fake.broken.clear()
+    real = core.Client.post
+
+    def dropped(self, proc, body):
+        if proc == "settings.updateServer":
+            raise core.DokployError("unreachable", "Dokploy does not answer (RemoteDisconnected)")
+        return real(self, proc, body)
+
+    core.Client.post = dropped
+    try:
+        assert core.dokploy_update(c, "v0.31.0", state)["latest"] == "v0.31.0"
+    finally:
+        core.Client.post = real
+    assert (state / "dokploy-update-started").exists()
+
+
+def test_the_page_checks_and_updates(core, repo, fake, state, monkeypatch, tmp_path):
+    api = load("api")
+    monkeypatch.setattr(api.core, "EXT_DIR", repo["ext"])
+    monkeypatch.setattr(api.core, "ci_state", lambda *a: "success")
+    ctx = {
+        "id": "dokploy",
+        "workspace": str(tmp_path / "ws"),
+        "state_dir": str(state),
+        "secret": {"DOKPLOY_API_KEY": KEY}.get,
+    }
+    r = api.handle(ctx, "GET", "updates", {}, None)
+    assert r["extension"]["state"] == "up_to_date" and r["dokploy"]["error"] == "not_connected"
+    assert r["harness"] == "/settings/updates"
+    api.handle(ctx, "POST", "connect", {}, {"url": fake.url})
+    sha = release(repo["src"], "1.1.0")
+    r = api.handle(ctx, "GET", "updates", {}, None)
+    assert r["extension"]["commit"] == sha and r["dokploy"]["latest"] == "v0.31.0"
+    assert api.handle(ctx, "POST", "update", {}, {"what": "extension", "to": sha}) == {
+        "updated": "extension",
+        "version": "1.1.0",
+    }
+    assert api.handle(ctx, "POST", "update", {}, {"what": "dokploy", "to": "v0.31.0"})["version"] == "v0.31.0"
+    assert api.handle(ctx, "POST", "update", {}, {"what": "harness"})[0] == 400
+
+
+def test_sessions_only_read_updates(core, repo, monkeypatch, maxxing_bin, capsys):
+    cli = load("dokploy")
+    monkeypatch.setattr(cli.core, "EXT_DIR", repo["ext"])
+    assert cli.main(["updates"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("extension  1.0.0 -> 1.0.0  up_to_date") and "the user's" in out
+    with pytest.raises(SystemExit):
+        cli.main(["update", "extension"])  # no such command for sessions
+    capsys.readouterr()
+
+
+def test_bad_manifests_never_crash_the_check(core, repo, tmp_path):
+    sha = release(repo["src"], "1.1.0")
+    (repo["src"] / "manifest.json").write_text('{"id": "dokploy", "version": "1.2.0", "api": "x"}')
+    git(repo["src"], "commit", "-qam", "bad api")
+    git(repo["src"], "push", "-q", "origin", "main")
+    chk = core.ext_check(repo["ext"])
+    assert chk["state"] == "blocked" and "bad_manifest" in chk["blockers"] and chk["commit"] != sha
+    (repo["src"] / "manifest.json").write_text("[1, 2]")
+    git(repo["src"], "commit", "-qam", "not an object")
+    git(repo["src"], "push", "-q", "origin", "main")
+    assert "not_this_extension" in core.ext_check(repo["ext"])["blockers"]
+    (repo["ext"] / "manifest.json").write_text("{broken")
+    assert core.ext_check(repo["ext"])["state"] == "bad_manifest"
+
+
+def test_a_detached_head_has_no_upstream(core, repo):
+    git(repo["ext"], "checkout", "-q", "--detach")
+    assert core.ext_check(repo["ext"])["state"] == "no_upstream"
+
+
+def test_a_merge_git_refuses_is_reported_and_changes_nothing(core, repo):
+    (repo["src"] / "new.txt").write_text("from the repository")
+    sha = release(repo["src"], "1.1.0")
+    (repo["ext"] / "new.txt").write_text("an untracked local file")  # git will not overwrite it
+    assert core.ext_check(repo["ext"])["state"] == "available"  # the user checked first, as on the page
+    before = git(repo["ext"], "rev-parse", "HEAD")
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, sha)
+    assert e.value.code == "update_failed" and git(repo["ext"], "rev-parse", "HEAD") == before
+
+
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX")
+def test_git_is_killed_with_its_children_on_timeout(core, tmp_path, monkeypatch):
+    import time
+
+    hook = tmp_path / "slow"
+    hook.write_text("#!/bin/sh\nsleep 30 &\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    (tmp_path / "git-slow").symlink_to(hook)
+    start = time.monotonic()
+    assert core._git(tmp_path, "slow", timeout=1) == (124, "", "timeout")
+    assert time.monotonic() - start < 5
+
+
+def test_ci_needs_one_success_and_the_whole_list(core, github):
+    url = "https://github.com/acme/x"
+    only_skipped, many = "e" * 40, "f" * 40
+    github[only_skipped] = [{"status": "completed", "conclusion": "skipped"}]
+    github[many] = {"total_count": 150, "check_runs": [{"status": "completed", "conclusion": "success"}] * 100}
+    assert core.ci_state(url, only_skipped) == "unknown"
+    assert core.ci_state(url, many) == "unknown"  # more than one page: not enough to call it green
+    assert core.ci_state("https://evilgithub.com/acme/x", "a" * 40) == "unknown"
+    github["status"] = 429
+    assert core.ci_state(url, "a" * 40) == "rate_limited"
+
+
+def test_the_upstream_remote_need_not_be_origin(core, repo):
+    git(repo["ext"], "remote", "rename", "origin", "upstream")
+    sha = release(repo["src"], "1.1.0")
+    chk = core.ext_check(repo["ext"])
+    assert chk["state"] == "available" and chk["commit"] == sha
+
+
+def test_odd_or_unsafe_setups_fail_closed(core, repo, tmp_path, monkeypatch):
+    release(repo["src"], "1.1.0")
+    assert core.ext_check(repo["ext"], budget=0)["state"] == "timeout"  # no time left: never a false state
+    outer = tmp_path / "outer"
+    (outer / "extensions" / "dokploy").mkdir(parents=True)
+    subprocess.run([*GIT, "init", "-q", str(outer)], check=True)
+    (outer / "extensions" / "dokploy" / "manifest.json").write_text('{"id": "dokploy", "version": "1.0.0"}')
+    assert core.ext_check(outer / "extensions" / "dokploy")["state"] == "not_git"  # a copy inside another repo
+    git(repo["ext"], "config", "branch.main.remote", "-x")
+    assert core.ext_check(repo["ext"], fetch=False)["state"] == "no_upstream"
+    real = core._git
+    monkeypatch.setattr(
+        core,
+        "_git",
+        lambda d, *a, **k: (
+            (128, "", "fatal: detected dubious ownership in repository") if "--show-toplevel" in a else real(d, *a, **k)
+        ),
+    )
+    assert core.ext_check(repo["ext"])["state"] == "dubious_owner"
+
+
+def test_a_stale_or_future_marker_does_not_block_dokploy_updates(core, fake, state):
+    import time
+
+    c = core.Client(fake.url, KEY)
+    marker = state / "dokploy-update-started"
+    for age in (core.DOKPLOY_UPDATE_WAIT + 10, -3600):  # long ago, or dated in the future
+        marker.touch()
+        os.utime(marker, (time.time() - age, time.time() - age))
+        core.dokploy_update(c, "v0.31.0", state)
+        assert marker.exists()  # this update holds it now
+        marker.unlink()
+
+
+def test_a_dokploy_that_cannot_be_reached_before_updating_leaves_no_marker(core, fake, state):
+    fake.close()  # Dokploy is down before anything is sent
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(core.Client(fake.url, KEY, timeout=2), "v0.31.0", state)
+    assert e.value.code == "unreachable" and not (state / "dokploy-update-started").exists()
+
+
+def test_a_merge_that_times_out_says_how_to_recover(core, repo, monkeypatch):
+    sha = release(repo["src"], "1.1.0")
+    assert core.ext_check(repo["ext"])["state"] == "available"
+    real = core._git
+    monkeypatch.setattr(
+        core, "_git", lambda d, *a, **k: (124, "", "timeout") if a[:1] == ("merge",) else real(d, *a, **k)
+    )
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, sha)
+    assert e.value.code == "update_failed" and "status" in e.value.message
+
+
+@pytest.mark.parametrize(
+    "url, ok",
+    [
+        ("https://github.com/acme/x.git", True),
+        ("git@github.com:acme/x.git", True),
+        ("https://user@github.com/acme/x", True),
+        ("ssh://git@github.com/acme/x.git", True),
+        ("https://github.com.evil.com/acme/x", False),
+        ("https://evil.com/github.com/acme/x", False),
+        ("https://evilgithub.com/acme/x", False),
+    ],
+)
+def test_only_real_github_remotes_are_looked_up(core, url, ok):
+    m = core.GITHUB_RE.search(url)
+    assert bool(m) is ok and (not ok or (m[1], m[2]) == ("acme", "x"))

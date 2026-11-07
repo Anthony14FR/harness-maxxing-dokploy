@@ -13,6 +13,7 @@ by itself.
 D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status                       # connected? (if not: the user opens the Dokploy page in Harness)
 python3 $D install-skill                # refresh this skill when status says it is out of date
+python3 $D updates [--json]            # what can be updated (read-only)
 python3 $D list [--json]                # projects, apps, compose stacks, databases, their state and domains
 python3 $D environments [--json]        # environment ids, for app create
 python3 $D deployments APP [--json]     # newest first
@@ -40,6 +41,8 @@ python3 $D app create --environment ID --name N --repo URL [--branch B] [--build
   answer "is it up?", run `health APP`: `ok`, `partial` (some containers down), `down`, `stopped` (0 replicas wanted,
   or every container exited cleanly) or `unknown` (Dokploy cannot match its containers: check in Dokploy), with
   running / expected containers. It always exits 0: read the first word.
+- **Updates are the user's.** `updates` only reads: never update the extension, Dokploy or Harness yourself; tell
+  the user to use **Updates** on the Dokploy page (Harness: Settings -> Updates).
 - If `status` warns that this skill is missing or out of date, run `install-skill`, then read this file again.
 - APP is the id, the name or the app name from `list`; a name used in two projects needs the id.
 - A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`, `ssh://` or

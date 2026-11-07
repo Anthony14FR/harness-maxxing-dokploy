@@ -12,6 +12,37 @@ const T = {
     deploy: "Deploy", redeploy: "Rebuild", logs: "Last log", close: "Close",
     confirmDeploy: (n) => `Deploy ${n} now?`, confirmRedeploy: (n) => `Rebuild and redeploy ${n} now?`,
     started: (n) => `Deployment of ${n} started.`, noLog: "No deployment yet.",
+    upd: {
+      title: "Updates", check: "Check for updates", checking: "Checking…",
+      ext: "This extension", dok: "Dokploy", har: "Harness Maxxing",
+      upToDate: (v) => `Up to date (${v}).`, available: (a, b) => `${a} → ${b}`,
+      update: "Update", harLink: "Open Settings → Updates",
+      harText: "Harness updates itself, with its own checks and rollback, in Settings → Updates.",
+      confirmExt: (a, b) => `Update this extension from ${a} to ${b}?`,
+      confirmDok: (a, b) => `Update Dokploy from ${a} to ${b}?`,
+      doneExt: (v) => `Extension updated to ${v}: the page reloads.`,
+      doneDok: (v) => `Dokploy is updating to ${v}: its own page is back in about 2 minutes.`,
+      state: {
+        not_git: "Installed without git: update it the way it was installed.",
+        unreachable: "The extension's repository cannot be reached right now.",
+        no_upstream: "Its git folder follows no remote branch.",
+        ahead: "Newer than its repository (a development copy): nothing to update.",
+        bad_manifest: "Its manifest.json cannot be read.",
+        dubious_owner: "git refuses its folder (owned by another user): see the README.",
+      },
+      blocked: "Not updated automatically:",
+      blocker: {
+        local_changes: "files of the extension were changed here",
+        not_fast_forward: "its history differs from the repository",
+        needs_newer_harness: "the new version needs a newer Harness: update Harness first",
+        not_this_extension: "the repository now holds another extension",
+        ci_failure: "the new version failed its tests",
+        ci_pending: "the new version is still being tested: try again in a few minutes",
+        ci_unknown: "the new version's tests cannot be checked (GitHub only, public repository)",
+        ci_rate_limited: "GitHub limits checks for now: try again in an hour",
+        bad_manifest: "the new version's manifest.json is not valid",
+      },
+    },
     cols: ["Last deployment", "Containers", "Kind", "Project", "Name", "Domains", ""],
     health: { ok: "running", partial: "partly down", down: "down", stopped: "stopped", unknown: "unknown" },
     risk: {
@@ -19,6 +50,7 @@ const T = {
       no_rebuild: "It has no git source: nothing is rebuilt, the same image starts again.",
       unknown: "Dokploy did not give its details: assume the site can go down.",
       stopped: "The site stays down until you start it again.",
+      dokploy_away: "Your sites stay up: Traefik and the apps keep running. Dokploy's own page and API are away for about 2 minutes.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
@@ -40,6 +72,37 @@ const T = {
     deploy: "Déployer", redeploy: "Reconstruire", logs: "Dernier log", close: "Fermer",
     confirmDeploy: (n) => `Déployer ${n} maintenant ?`, confirmRedeploy: (n) => `Reconstruire et redéployer ${n} maintenant ?`,
     started: (n) => `Déploiement de ${n} lancé.`, noLog: "Aucun déploiement pour l’instant.",
+    upd: {
+      title: "Mises à jour", check: "Vérifier les mises à jour", checking: "Vérification…",
+      ext: "Cette extension", dok: "Dokploy", har: "Harness Maxxing",
+      upToDate: (v) => `À jour (${v}).`, available: (a, b) => `${a} → ${b}`,
+      update: "Mettre à jour", harLink: "Ouvrir Réglages → Mises à jour",
+      harText: "Harness se met à jour lui-même, avec ses vérifications et son retour arrière, dans Réglages → Mises à jour.",
+      confirmExt: (a, b) => `Mettre à jour cette extension de ${a} vers ${b} ?`,
+      confirmDok: (a, b) => `Mettre à jour Dokploy de ${a} vers ${b} ?`,
+      doneExt: (v) => `Extension mise à jour en ${v} : la page se recharge.`,
+      doneDok: (v) => `Dokploy passe en ${v} : sa propre page revient dans 2 minutes environ.`,
+      state: {
+        not_git: "Installée sans git : mettez-la à jour comme vous l’avez installée.",
+        unreachable: "Le dépôt de l’extension est injoignable pour le moment.",
+        no_upstream: "Son dossier git ne suit aucune branche distante.",
+        ahead: "Plus récente que son dépôt (une copie de développement) : rien à mettre à jour.",
+        bad_manifest: "Son manifest.json est illisible.",
+        dubious_owner: "git refuse son dossier (il appartient à un autre utilisateur) : voir le README.",
+      },
+      blocked: "Pas de mise à jour automatique :",
+      blocker: {
+        local_changes: "des fichiers de l’extension ont été modifiés ici",
+        not_fast_forward: "son historique diffère de celui du dépôt",
+        needs_newer_harness: "la nouvelle version demande un Harness plus récent : mettez d’abord Harness à jour",
+        not_this_extension: "le dépôt contient maintenant une autre extension",
+        ci_failure: "la nouvelle version a échoué à ses tests",
+        ci_pending: "la nouvelle version est encore en test : réessayez dans quelques minutes",
+        ci_unknown: "les tests de la nouvelle version ne peuvent pas être vérifiés (GitHub uniquement, dépôt public)",
+        ci_rate_limited: "GitHub limite les vérifications pour le moment : réessayez dans une heure",
+        bad_manifest: "le manifest.json de la nouvelle version n’est pas valide",
+      },
+    },
     cols: ["Dernier déploiement", "Conteneurs", "Type", "Projet", "Nom", "Domaines", ""],
     health: { ok: "en marche", partial: "en partie arrêté", down: "en panne", stopped: "arrêté", unknown: "inconnu" },
     risk: {
@@ -47,6 +110,7 @@ const T = {
       no_rebuild: "Il n’a pas de source git : rien n’est reconstruit, la même image redémarre.",
       unknown: "Dokploy n’a pas donné ses détails : considérez que le site peut être coupé.",
       stopped: "Le site reste coupé jusqu’à ce que vous le redémarriez.",
+      dokploy_away: "Vos sites restent en ligne : Traefik et les apps continuent de tourner. La page et l’API de Dokploy sont absentes 2 minutes environ.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
@@ -78,8 +142,9 @@ export function mount(el, ctx) {
   const notice = h("div", { class: "ui-callout", hidden: true });
   const skillBar = h("div", { class: "ui-callout ui-warning ui-row", hidden: true, style: "flex-wrap:wrap;gap:8px" });
   const body = h("div", { class: "ui-stack" });
+  const updates = h("section", { class: "ui-card ui-stack" });
   el.replaceChildren(h("div", { class: "ui-page", style: "max-width:1100px" },
-    h("h1", { class: "ui-h1" }, t.title), h("p", { class: "ui-muted" }, t.intro), notice, skillBar, body));
+    h("h1", { class: "ui-h1" }, t.title), h("p", { class: "ui-muted" }, t.intro), notice, skillBar, body, updates));
 
   const say = (text, kind = "ui-info") => {
     notice.className = `ui-callout ${kind}`;
@@ -114,7 +179,7 @@ export function mount(el, ctx) {
 
   // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
   function confirmPanel(svc, question, run, close, risks = svc.risks || ["unknown"]) {
-    const typed = ["downtime", "unknown", "stopped"].some((r) => risks.includes(r));
+    const typed = ["downtime", "unknown", "stopped", "dokploy_away"].some((r) => risks.includes(r));
     const name = String(svc.name).trim();
     const input = typed ? h("input", { class: "ui-input", placeholder: t.typeName(name), "aria-label": t.typeName(name) }) : null;
     const ok = h("button", { class: "ui-btn ui-danger ui-sm", disabled: typed }, t.confirm);
@@ -240,6 +305,53 @@ export function mount(el, ctx) {
     skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), state === "broken" ? null : btn);
   }
 
+  // Updates: a check changes nothing; each update runs only the exact version the user confirmed.
+  function updatesPanel() {
+    const u = t.upd;
+    const out = h("div", { class: "ui-stack" });
+    const slot = h("div");
+    const btn = h("button", { class: "ui-btn ui-outline ui-sm", onclick: check }, u.check);
+    updates.replaceChildren(h("div", { class: "ui-row", style: "flex-wrap:wrap;gap:8px" },
+      h("h2", { class: "ui-h2" }, u.title), h("span", { class: "ui-spacer" }), btn), out, slot);
+    const row = (label, ...rest) => h("div", { class: "ui-stack", style: "gap:4px" }, h("b", {}, label), ...rest);
+    const run = (what, to, done) => async () => {
+      try {
+        const r = await ctx.api("update", { method: "POST", body: { what, to } });
+        say(done(r.version), "ui-success");
+        if (what === "extension") setTimeout(() => { if (alive) window.location.reload(); }, 2000);
+      } catch (e) { fail(e); }
+    };
+    async function check() {
+      btn.disabled = true;
+      btn.textContent = u.checking;
+      try {
+        const r = await ctx.api("updates");
+        if (!alive) return;
+        const e = r.extension, d = r.dokploy;
+        let ext;
+        if (e.state === "up_to_date") ext = h("span", { class: "ui-muted" }, u.upToDate(e.current));
+        else if (e.state === "available") {
+          ext = [h("span", {}, u.available(e.current, e.new)), e.changes ? h("pre", { class: "ui-code", style: "max-height:240px;overflow:auto;white-space:pre-wrap" }, e.changes) : null,
+            h("div", {}, h("button", { class: "ui-btn ui-sm", onclick: () => slot.replaceChildren(confirmPanel({ name: "extension" },
+              u.confirmExt(e.current, e.new), run("extension", e.commit, u.doneExt), () => slot.replaceChildren(), [])) }, u.update))];
+        } else if (e.state === "blocked") {
+          ext = [h("span", {}, u.available(e.current, e.new || "?")), h("span", { class: "ui-muted" }, u.blocked),
+            h("ul", { class: "ui-list" }, e.blockers.map((b) => h("li", {}, u.blocker[b] || b)))];
+        } else ext = h("span", { class: "ui-muted" }, u.state[e.state] || e.state);
+        let dok;
+        if (d.error) dok = h("span", { class: "ui-muted" }, d.message);
+        else if (!d.available) dok = h("span", { class: "ui-muted" }, u.upToDate(d.current || "?"));
+        else dok = [h("span", {}, u.available(d.current || "?", d.latest)), h("div", {}, h("button", { class: "ui-btn ui-sm",
+          onclick: () => slot.replaceChildren(confirmPanel({ name: "dokploy" }, u.confirmDok(d.current || "?", d.latest),
+            run("dokploy", d.latest, u.doneDok), () => slot.replaceChildren(), ["dokploy_away"])) }, u.update))];
+        out.replaceChildren(row(u.ext, ext), row(u.dok, dok), row(u.har, h("span", { class: "ui-muted" }, u.harText),
+          h("div", {}, h("button", { class: "ui-btn ui-ghost ui-sm", onclick: () => ctx.navigate(r.harness) }, u.harLink))));
+      } catch (e) { fail(e); }
+      btn.disabled = false;
+      btn.textContent = u.check;
+    }
+  }
+
   let generation = 0;
   async function load() {
     generation += 1;
@@ -268,6 +380,7 @@ export function mount(el, ctx) {
     }
   }
 
+  updatesPanel();
   load();
   return () => { alive = false; };
 }
