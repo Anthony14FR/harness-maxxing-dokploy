@@ -87,6 +87,13 @@ def test_unclean_updates_are_refused(core, repo, monkeypatch, setup, blocker):
     assert e.value.code == "update_refused" and git(repo["ext"], "rev-parse", "HEAD") == before
 
 
+def test_a_checkout_newer_than_its_repository_is_not_downgraded(core, repo):
+    (repo["ext"] / "notes.md").write_text("x")
+    git(repo["ext"], "add", "notes.md")
+    git(repo["ext"], "commit", "-qm", "work in progress")
+    assert core.ext_check(repo["ext"])["state"] == "ahead"
+
+
 def test_states_without_a_usable_repository(core, repo, tmp_path):
     plain = tmp_path / "copied"
     plain.mkdir()

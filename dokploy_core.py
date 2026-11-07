@@ -353,6 +353,8 @@ def ext_check(ext_dir: Path = EXT_DIR, supported_api: int = 1, fetch: bool = Tru
     head, new = _git(ext_dir, "rev-parse", "HEAD")[1], _git(ext_dir, "rev-parse", "@{u}")[1]
     if head == new:
         return {**out, "state": "up_to_date", "new": cur.get("version"), "commit": new}
+    if _git(ext_dir, "merge-base", "--is-ancestor", "@{u}", "HEAD")[0] == 0:
+        return {**out, "state": "ahead", "commit": head}  # a newer checkout than the repository: nothing to fetch
     try:
         man = json.loads(_git(ext_dir, "show", "@{u}:manifest.json")[1])
     except ValueError:

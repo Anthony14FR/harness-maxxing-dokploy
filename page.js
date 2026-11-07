@@ -26,6 +26,7 @@ const T = {
         not_git: "Installed without git: update it the way it was installed.",
         unreachable: "The extension's repository cannot be reached right now.",
         no_upstream: "Its git folder follows no remote branch.",
+        ahead: "Newer than its repository (a development copy): nothing to update.",
       },
       blocked: "Not updated automatically:",
       blocker: {
@@ -81,6 +82,7 @@ const T = {
         not_git: "Installée sans git : mettez-la à jour comme vous l’avez installée.",
         unreachable: "Le dépôt de l’extension est injoignable pour le moment.",
         no_upstream: "Son dossier git ne suit aucune branche distante.",
+        ahead: "Plus récente que son dépôt (une copie de développement) : rien à mettre à jour.",
       },
       blocked: "Pas de mise à jour automatique :",
       blocker: {
