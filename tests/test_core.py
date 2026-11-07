@@ -196,7 +196,7 @@ def test_domain_add_app_and_compose(core, fake):
 def test_deployments_newest_first_with_a_one_line_title(core, fake):
     c = core.Client(fake.url, KEY)
     deps = core.deployments(c, core.find(core.inventory(c), "a1"))
-    assert [d["id"] for d in deps] == ["d2", "d1"] and deps[0]["title"] == "fix: build"
+    assert [d["id"] for d in deps] == ["d2", "d1", "d0"] and deps[0]["title"] == "fix: build"
 
 
 def test_logs_stay_inside_the_dokploy_folder(core, fake, tmp_path):
@@ -352,3 +352,57 @@ def test_lookup_falls_back_to_app_names_and_keeps_ambiguity(core, fake):
     with pytest.raises(core.DokployError) as e:
         core.lookup(c, "web")
     assert e.value.code == "ambiguous"
+
+
+def test_stop_and_start(core, fake):
+    c = core.Client(fake.url, KEY)
+    svcs = core.inventory(c)
+    core.power(c, core.find(svcs, "a1"), False)
+    core.power(c, core.find(svcs, "c1"), True)
+    assert fake.writes() == [
+        ("POST", "application.stop", {"applicationId": "a1"}),
+        ("POST", "compose.start", {"composeId": "c1"}),
+    ]
+    with pytest.raises(core.DokployError):
+        core.power(c, core.find(svcs, "pg1"), False)
+
+
+def test_rollback_goes_back_before_what_runs_now(core, fake):
+    c = core.Client(fake.url, KEY)
+    svcs = core.inventory(c)
+    a1 = core.find(svcs, "a1")
+    target = core.rollback_target(c, a1)
+    assert (target["id"], target["rollback_id"]) == ("d0", "r0")  # d2 failed, so d1 still runs: go before it
+    with pytest.raises(core.DokployError) as e:
+        core.rollback(c, a1, target, confirmed="d1")
+    assert e.value.code == "target_changed" and not fake.writes()
+    core.rollback(c, a1, target, confirmed="d0")
+    assert fake.writes() == [("POST", "rollback.rollback", {"rollbackId": "r0"})]
+    for svc, code in ((core.find(svcs, "c1"), "not_supported"), ({**a1, "rollback_active": False}, "rollback_off")):
+        with pytest.raises(core.DokployError) as e:
+            core.rollback_target(c, svc)
+        assert e.value.code == code
+
+
+def test_no_rollback_during_a_deployment(core, fake, monkeypatch):
+    c = core.Client(fake.url, KEY)
+    a1 = core.find(core.inventory(c), "a1")
+    deps = [{"id": "d5", "status": "running", "rollback_id": None}, {"id": "d4", "status": "done", "rollback_id": "r4"}]
+    monkeypatch.setattr(core, "deployments", lambda c, s: deps)
+    with pytest.raises(core.DokployError) as e:
+        core.rollback_target(c, a1)
+    assert e.value.code == "deploy_in_progress"
+
+
+def test_deployments_sort_on_real_dates(core):
+    assert core._when("2026-09-01T10:00:00+02:00") < core._when("2026-09-01T09:00:00Z")
+    assert core._when(None) < core._when("2000-01-01T00:00:00Z")
+
+
+def test_no_earlier_deployment_to_roll_back_to(core, fake, monkeypatch):
+    c = core.Client(fake.url, KEY)
+    a1 = core.find(core.inventory(c), "a1")
+    monkeypatch.setattr(core, "deployments", lambda c, s: [{"id": "d9", "status": "done", "rollback_id": "r9"}])
+    with pytest.raises(core.DokployError) as e:
+        core.rollback_target(c, a1)  # the only one is the current deployment
+    assert e.value.code == "no_rollback"

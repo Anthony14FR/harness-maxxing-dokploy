@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import fcntl
 import hashlib
 import ipaddress
@@ -314,6 +315,7 @@ def _service(kind: str, s: dict, p: dict, e: dict) -> dict:
         "source": s.get("sourceType") if kind in _PLURAL else None,
         "start_first": _start_first(s) if kind == "application" else None,
         "replicas": s.get("replicas") if kind == "application" else None,
+        "rollback_active": s.get("rollbackActive") if kind == "application" else None,
         "compose_type": s.get("composeType") if kind == "compose" else None,
         "server_id": s.get("serverId"),
     }
@@ -432,6 +434,40 @@ def deploy(c: Client, svc: dict, title: str | None = None, again: bool = False) 
     if title:
         body["title"] = title.strip()[:120]
     c.post(f"{svc['kind']}.{'redeploy' if again else 'deploy'}", body)
+
+
+def power(c: Client, svc: dict, on: bool) -> None:
+    """Start or stop an app or a stack (its containers), without rebuilding anything."""
+    _deployable(svc)
+    c.post(f"{svc['kind']}.{'start' if on else 'stop'}", {_ID[svc["kind"]]: svc["id"]})
+
+
+def rollback_target(c: Client, svc: dict) -> dict:
+    """The deployment a rollback goes back to: the newest earlier successful one that kept a rollback image."""
+    _deployable(svc)
+    if svc["kind"] != "application":
+        raise DokployError("not_supported", "Dokploy rolls back applications only: redeploy the stack instead")
+    if not svc.get("rollback_active"):
+        raise DokployError(
+            "rollback_off", f"rollbacks are off for {svc['name']}: turn them on in Dokploy (they need a registry)"
+        )
+    deps = deployments(c, svc)
+    if deps and deps[0]["status"] in ("running", "queued"):
+        raise DokployError("deploy_in_progress", f"a deployment of {svc['name']} is running: wait for it first")
+    done = [d for d in deps if d["status"] == "done"]  # done[0] is what runs now (a failed deploy keeps the old one)
+    target = next((d for d in done[1:] if d.get("rollback_id")), None)
+    if not target:
+        raise DokployError("no_rollback", f"{svc['name']} has no earlier deployment to go back to")
+    return target
+
+
+def rollback(c: Client, svc: dict, target: dict, confirmed: str | None = None) -> None:
+    """`confirmed`: the deployment id the user agreed to; refused if the target moved since."""
+    if confirmed is not None and confirmed != target["id"]:
+        raise DokployError(
+            "target_changed", "the deployments changed since you confirmed: look again before rolling back"
+        )
+    c.post("rollback.rollback", {"rollbackId": target["rollback_id"]})
 
 
 def domain_add(
@@ -579,11 +615,21 @@ def deployments(c: Client, svc: dict) -> list[dict]:
             "status": d.get("status"),
             "created": d.get("createdAt"),
             "log_path": d.get("logPath"),
+            "rollback_id": d.get("rollbackId"),
         }
         for d in rows
         if isinstance(d, dict)
     ]  # Dokploy titles a git deployment with the whole commit message
-    return sorted(out, key=lambda d: d["created"] or "", reverse=True)
+    return sorted(out, key=lambda d: _when(d["created"]), reverse=True)
+
+
+def _when(stamp: str | None) -> dt.datetime:
+    """Dokploy's ISO timestamps as dates (a string sort breaks on other offsets); none sorts oldest."""
+    try:
+        t = dt.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return dt.datetime.min.replace(tzinfo=dt.UTC)
+    return t if t.tzinfo else t.replace(tzinfo=dt.UTC)
 
 
 def log(dep: dict, lines: int = 200) -> str:

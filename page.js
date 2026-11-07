@@ -18,6 +18,10 @@ const T = {
       unknown: "Dokploy did not give its details: assume the site can go down.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
+    stop: "Stop", start: "Start", rollback: "Roll back",
+    confirmStop: (n) => `Stop ${n} now?`, confirmStart: (n) => `Start ${n} now?`,
+    confirmRollback: (n, d) => `Roll ${n} back to “${d}”?`,
+    doneAction: { stop: (n) => `${n} is stopping.`, start: (n) => `${n} is starting.`, rollback: (n) => `Rollback of ${n} started.` },
     protect: "Protect", unprotect: "Unprotect", protectedBadge: "protected",
     protectedHelp: "Protected: read-only here and for sessions. Only you can lift it, on this page.",
   },
@@ -39,6 +43,10 @@ const T = {
       unknown: "Dokploy n’a pas donné ses détails : considérez que le site peut être coupé.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
+    stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
+    confirmStop: (n) => `Arrêter ${n} maintenant ?`, confirmStart: (n) => `Démarrer ${n} maintenant ?`,
+    confirmRollback: (n, d) => `Revenir pour ${n} au déploiement « ${d} » ?`,
+    doneAction: { stop: (n) => `${n} s’arrête.`, start: (n) => `${n} démarre.`, rollback: (n) => `Retour arrière de ${n} lancé.` },
     protect: "Protéger", unprotect: "Ne plus protéger", protectedBadge: "protégé",
     protectedHelp: "Protégé : en lecture seule ici et pour les sessions. Vous seul pouvez lever la protection, sur cette page.",
   },
@@ -98,8 +106,7 @@ export function mount(el, ctx) {
   }
 
   // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
-  function confirmPanel(svc, question, run, close) {
-    const risks = svc.risks || ["unknown"];
+  function confirmPanel(svc, question, run, close, risks = svc.risks || ["unknown"]) {
     const typed = risks.includes("downtime") || risks.includes("unknown");
     const name = String(svc.name).trim();
     const input = typed ? h("input", { class: "ui-input", placeholder: t.typeName(name), "aria-label": t.typeName(name) }) : null;
@@ -147,6 +154,24 @@ export function mount(el, ctx) {
           say(t.started(svc.name), "ui-success");
         } catch (e) { fail(e); }
       }, close));
+    const act = async (svc, action) => {
+      let deployment = null;
+      const go = async () => {
+        try {
+          await ctx.api("action", { method: "POST", body: { id: svc.id, action, deployment } });
+          say(t.doneAction[action](svc.name), "ui-success");
+          setTimeout(() => { if (alive) load(); }, 4000);  // let the containers move before reading them again
+        } catch (e) { fail(e); }
+      };
+      if (action === "stop") return slot.replaceChildren(confirmPanel(svc, t.confirmStop(svc.name), go, close, ["downtime"]));
+      if (action === "start") return slot.replaceChildren(confirmPanel(svc, t.confirmStart(svc.name), go, close, []));
+      try {  // rollback: say which deployment it goes back to before asking
+        const d = await ctx.api(`rollback?id=${encodeURIComponent(svc.id)}`);
+        deployment = d.deployment;  // the server refuses if the target moved since
+        const risks = (svc.risks || ["unknown"]).filter((r) => r !== "no_rebuild");
+        slot.replaceChildren(confirmPanel(svc, t.confirmRollback(svc.name, d.title || d.created || d.deployment), go, close, risks));
+      } catch (e) { fail(e); }
+    };
     const protect = async (svc, on) => {
       try { await ctx.api("protect", { method: "POST", body: { id: svc.id, on } }); load(); } catch (e) { fail(e); }
     };
@@ -159,6 +184,9 @@ export function mount(el, ctx) {
       const writes = deployable && !s.protected ? [
         h("button", { class: "ui-btn ui-sm", onclick: () => deploy(s, false) }, t.deploy), " ",
         h("button", { class: "ui-btn ui-secondary ui-sm", onclick: () => deploy(s, true) }, t.redeploy), " ",
+        s.kind === "application" && s.rollback_active ? [h("button", { class: "ui-btn ui-outline ui-sm", onclick: () => act(s, "rollback") }, t.rollback), " "] : null,
+        h("button", { class: "ui-btn ui-outline ui-sm", onclick: () => act(s, "stop") }, t.stop), " ",
+        h("button", { class: "ui-btn ui-outline ui-sm", onclick: () => act(s, "start") }, t.start), " ",
       ] : [];
       const last = s.last_deployment ?? s.status;
       const boxes = h("td", {}, deployable ? h("span", { class: "ui-skeleton", style: "display:inline-block;width:64px;height:1em" }) : "-");

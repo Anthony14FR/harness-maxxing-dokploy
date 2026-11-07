@@ -6,6 +6,8 @@
     dokploy.py environments [--json]                          where `app create` can put an app
     dokploy.py deploy|redeploy APP --yes [--title T]          APP = id, name or app name
     dokploy.py deployments APP [--json]
+    dokploy.py stop|start APP --yes                           stop or start its containers (nothing rebuilt)
+    dokploy.py rollback APP --yes                             back before the deployment running now (apps)
     dokploy.py health APP [--json]                            containers really running (not the last deployment)
     dokploy.py logs APP [--deployment ID] [--lines N]
     dokploy.py domain list APP
@@ -86,6 +88,14 @@ def parser() -> argparse.ArgumentParser:
     d = sub.add_parser("deployments", help="deployments of an app, newest first")
     d.add_argument("app")
     d.add_argument("--json", action="store_true")
+    for name, what in (
+        ("stop", "stop its containers"),
+        ("start", "start its containers"),
+        ("rollback", "go back before the deployment running now (applications)"),
+    ):
+        x = sub.add_parser(name, help=what)
+        x.add_argument("app")
+        x.add_argument("--yes", action="store_true")
     hp = sub.add_parser("health", help="containers really running, not the last deployment")
     hp.add_argument("app")
     hp.add_argument("--json", action="store_true")
@@ -192,13 +202,29 @@ def run(a: argparse.Namespace) -> int:
                 print("Nothing in Dokploy yet.")
         return 0
     svc = core.lookup(c, a.app)
-    if a.action in ("deploy", "redeploy") or getattr(a, "sub", None) == "add":
+    if a.action in ("deploy", "redeploy", "stop", "start", "rollback") or getattr(a, "sub", None) == "add":
         core.guard(st, svc)  # protected: refused before even asking the user
     if a.action in ("deploy", "redeploy"):
         if not _agreed(a, f"{a.action} {svc['project']}/{svc['name']}{_warned(svc)}"):
             return 3
         core.deploy(c, svc, a.title, again=a.action == "redeploy")
         print(f"{a.action} of {svc['name']} started; follow it with: dokploy.py logs {svc['id']}")
+        return 0
+    if a.action in ("stop", "start"):
+        warn = " (tell the user: the site is down until it is started again)" if a.action == "stop" else ""
+        if not _agreed(a, f"{a.action} {svc['project']}/{svc['name']}{warn}"):
+            return 3
+        core.power(c, svc, a.action == "start")
+        print(f"{svc['name']}: {a.action} sent; check it with: dokploy.py health {svc['id']}")
+        return 0
+    if a.action == "rollback":
+        target = core.rollback_target(c, svc)
+        back = f"{target['title'] or target['id']} ({target['created']})"
+        down = f" (tell the user: {RISK_TEXT['downtime']})" if "downtime" in core.risks(svc) else ""
+        if not _agreed(a, f"roll {svc['project']}/{svc['name']} back to {back}{down}"):
+            return 3
+        core.rollback(c, svc, target)
+        print(f"rollback of {svc['name']} to {back} started; follow it with: dokploy.py deployments {svc['id']}")
         return 0
     if a.action == "health":
         hl = core.health(c, svc)

@@ -19,26 +19,34 @@ python3 $D health APP [--json]          # containers really running: check this,
 python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D domain list APP
 python3 $D deploy APP --yes             # or redeploy (rebuild)
+python3 $D stop|start APP --yes         # its containers, nothing rebuilt
+python3 $D rollback APP --yes           # back before the deployment running now (applications)
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build nixpacks|dockerfile|...] --yes
 ```
 
 ## Rules
 
-- **Ask before every write.** `deploy`, `redeploy`, `domain add` and `app create` change a live service: say what
-  will happen (which app, which project, which domain) and wait for the user's yes before adding `--yes`. A command
-  without `--yes` stops with exit code 3 and changes nothing.
-- **Protected services** (`[protected]` in `list`, `"protected": true` in `--json`) are read-only: deploy, redeploy
-  and domain add are refused (`protected`). Never look for a way around it: only the user lifts it, on the Dokploy page in Harness.
+- **Ask before every write.** `deploy`, `redeploy`, `stop`, `start`, `rollback`, `domain add` and `app create` change
+  a live service: say what will happen (which app, which project, which domain) and wait for the user's yes before
+  adding `--yes`. A command without `--yes` stops with exit code 3 and changes nothing.
+- **Protected services** (`[protected]` in `list`, `"protected": true` in `--json`) are read-only: deploy, redeploy,
+  stop, start, rollback and domain add are refused (`protected`). Never look for a way around it: only the user lifts
+  it, on the Dokploy page in Harness.
 - **Say the risks before asking.** A deploy without `--yes` prints them (`tell the user: ...`): a compose stack or an
   app that is not start-first is down for a few seconds; a service with no git source rebuilds nothing.
-- **`list` shows the last deployment, not whether the site is up**: `done` can hide a container that died since.
-  To answer "is it up?", run `health APP`: `ok`, `partial` (some containers down), `down`, `stopped` (0 replicas
-  wanted, or every container exited cleanly) or `unknown` (Dokploy cannot match its containers: check in Dokploy), with running / expected containers. It always exits 0: read the first word.
+- **`list` shows the last deployment, not whether the site is up**: `done` can hide a container that died since. To
+  answer "is it up?", run `health APP`: `ok`, `partial` (some containers down), `down`, `stopped` (0 replicas wanted,
+  or every container exited cleanly) or `unknown` (Dokploy cannot match its containers: check in Dokploy), with
+  running / expected containers. It always exits 0: read the first word.
 - APP is the id, the name or the app name from `list`; a name used in two projects needs the id.
-- A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`,
-  `ssh://` or `git@host:path`. A domain also needs its DNS pointing to the server, then a redeploy.
+- A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`, `ssh://` or
+  `git@host:path`. A domain also needs its DNS pointing to the server, then a redeploy.
 - **Deployment logs can contain environment values**: quote only the lines that explain an error, never secrets.
 - Logs are read on this server only; for a Dokploy on another server, send the user to Dokploy's own page.
-- Errors: `not_connected` or `key_changed` -> the user opens the Dokploy page in Harness and checks the key;
-  `refused` -> the key was revoked in Dokploy; `unreachable` -> Dokploy is down or the address is wrong.
+- **A deployment broke the site?** Offer `rollback` first (it says which deployment it goes back to). Dokploy keeps no
+  record of a rollback: a second one targets the same deployment, it does not go further back. Errors:
+  `rollback_off` (rollbacks are off for that app in Dokploy: they need a registry), `deploy_in_progress` (wait),
+  `no_rollback`, `not_supported` (compose stacks: redeploy instead).
+- Errors: `not_connected` or `key_changed` -> the user opens the Dokploy page in Harness and checks the key; `refused`
+  -> the key was revoked in Dokploy; `unreachable` -> Dokploy is down or the address is wrong.

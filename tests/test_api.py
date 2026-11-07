@@ -50,7 +50,7 @@ def test_deployments_hide_server_paths_and_log_reads_the_last(api, fake, state):
     keys = {"DOKPLOY_API_KEY": KEY}
     api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
     deps = api.handle(ctx(state, keys), "GET", "deployments", {"id": "a1"}, None)["deployments"]
-    assert [d["id"] for d in deps] == ["d2", "d1"] and all("log_path" not in d for d in deps)
+    assert [d["id"] for d in deps] == ["d2", "d1", "d0"] and all("log_path" not in d for d in deps)
     code, err = api.handle(ctx(state, keys), "GET", "log", {"id": "a1"}, None)  # d2 lives on another server
     assert code == 422 and err["error"] == "remote_log"
     (fake.logs / "acme-web-x1").mkdir(parents=True)
@@ -107,3 +107,28 @@ def test_health_of_an_unknown_service(api, fake, state):
     keys = {"DOKPLOY_API_KEY": KEY}
     api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
     assert api.handle(ctx(state, keys), "GET", "health", {"id": "nope"}, None)[0] == 404
+
+
+def test_actions_from_the_page(api, fake, state):
+    keys = {"DOKPLOY_API_KEY": KEY}
+    api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state, keys), "GET", "rollback", {"id": "a1"}, None)["deployment"] == "d0"
+    code, err = api.handle(ctx(state, keys), "POST", "action", {}, {"id": "a1", "action": "rollback"})
+    assert code == 409 and err["error"] == "target_changed"  # nothing confirmed: nothing runs
+    body = {"id": "a1", "action": "rollback", "deployment": "d0"}
+    assert api.handle(ctx(state, keys), "POST", "action", {}, body) == {
+        "done": "rollback",
+        "id": "a1",
+    }
+    assert api.handle(ctx(state, keys), "POST", "action", {}, {"id": "c1", "action": "stop"})["done"] == "stop"
+    assert api.handle(ctx(state, keys), "POST", "action", {}, {"id": "c1", "action": "delete"})[0] == 400
+    code, err = api.handle(ctx(state, keys), "GET", "rollback", {"id": "c1"}, None)
+    assert code == 409 and err["error"] == "not_supported"
+    api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "c1", "on": True})
+    n = len(fake.writes())
+    for action in ("start", "stop"):
+        code, err = api.handle(ctx(state, keys), "POST", "action", {}, {"id": "c1", "action": action})
+        assert code == 409 and err["error"] == "protected"
+    api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "a1", "on": True})
+    code, err = api.handle(ctx(state, keys), "POST", "action", {}, body)
+    assert code == 409 and err["error"] == "protected" and len(fake.writes()) == n

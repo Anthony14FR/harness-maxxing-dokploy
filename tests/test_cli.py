@@ -57,7 +57,7 @@ def test_reads(connected, fake, capsys):
     assert "production" in run(connected, capsys, "environments")[1]
     assert "web.example.com" in run(connected, capsys, "domain", "list", "a1")[1]
     code, out, _ = run(connected, capsys, "deployments", "a1", "--json")
-    assert code == 0 and [d["id"] for d in json.loads(out)] == ["d2", "d1"]
+    assert code == 0 and [d["id"] for d in json.loads(out)] == ["d2", "d1", "d0"]
     code, _, err = run(connected, capsys, "logs", "a1")
     assert code == 2 and "remote_log" in err
     assert run(connected, capsys, "deploy", "nope", "--yes")[0] == 1
@@ -98,3 +98,21 @@ def test_health_and_the_list_header(connected, capsys):
     assert code == 0 and out.startswith("partial  1/2 running") and "Exited (1)" in out
     assert json.loads(run(connected, capsys, "health", "a1", "--json")[1])["state"] == "ok"
     assert run(connected, capsys, "list")[1].splitlines()[0].startswith("done ")  # no header: 1.x scripts parse it
+
+
+def test_stop_start_rollback_from_a_session(connected, core, state, fake, capsys):
+    code, _, err = run(connected, capsys, "stop", "api")
+    assert code == 3 and "down until it is started again" in err and not fake.writes()
+    code, _, err = run(connected, capsys, "rollback", "web-x", "--yes")
+    assert code == 1  # no such service
+    code, _, err = run(connected, capsys, "rollback", "acme-web-x1")
+    assert code == 3 and "back to first (2026-09-01" in err
+    assert run(connected, capsys, "rollback", "a1", "--yes")[0] == 0
+    assert run(connected, capsys, "start", "stack", "--yes")[0] == 0
+    assert [w[1] for w in fake.writes()] == ["rollback.rollback", "compose.start"]
+    core.set_protected(state, "a1", True)
+    for args in (["stop", "a1", "--yes"], ["rollback", "a1", "--yes"]):
+        code, _, err = run(connected, capsys, *args)
+        assert code == 2 and "protected" in err
+    code, _, err = run(connected, capsys, "rollback", "stack", "--yes")
+    assert code == 2 and "not_supported" in err

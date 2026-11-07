@@ -49,6 +49,21 @@ def handle(ctx, method, path, query, body):
             core.guard(state, svc)
             core.deploy(c, svc, "Harness Maxxing", again=bool(body.get("again")))
             return {"started": svc["id"]}
+        if path == "rollback" and method == "GET":  # what a rollback would go back to, for the confirmation
+            svc = core.lookup(c, str(query.get("id") or ""))
+            d = core.rollback_target(c, svc)
+            return {"deployment": d["id"], "title": d["title"], "created": d["created"]}
+        if path == "action" and method == "POST":  # stop, start or rollback, after the page asked the user
+            svc = core.lookup(c, str(body.get("id") or ""))
+            act = body.get("action")
+            if act not in ("stop", "start", "rollback"):
+                return 400, {"error": "bad_action", "message": "action must be stop, start or rollback"}
+            core.guard(state, svc)
+            if act == "rollback":  # what runs must be what the user confirmed
+                core.rollback(c, svc, core.rollback_target(c, svc), str(body.get("deployment") or ""))
+            else:
+                core.power(c, svc, act == "start")
+            return {"done": act, "id": svc["id"]}
         if path == "health" and method == "GET":
             return core.health(c, core.lookup(c, str(query.get("id") or "")))
         if path == "deployments" and method == "GET":
@@ -69,6 +84,11 @@ def handle(ctx, method, path, query, body):
             "key_changed": 409,
             "protected": 409,
             "bad_settings": 409,
+            "rollback_off": 409,
+            "no_rollback": 409,
+            "not_supported": 409,
+            "deploy_in_progress": 409,
+            "target_changed": 409,
             "not_found": 404,
         }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}

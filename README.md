@@ -4,9 +4,10 @@ A community [page extension](https://github.com/makushingu/harness-maxxing/blob/
 for [Harness Maxxing](https://github.com/makushingu/harness-maxxing) that connects it to
 [Dokploy](https://dokploy.com):
 
-- **A Dokploy page** in Harness: your projects, applications, compose stacks, databases and domains with their
-  last deployment, the containers really running and the last deployment log, and **Deploy** / **Rebuild** buttons
-  that ask you first (type the service name when the site can be down for a few seconds).
+- **A Dokploy page** in Harness: your projects, applications, compose stacks, databases and domains with their last
+  deployment, the containers really running and the last deployment log, and **Deploy**, **Rebuild**, **Roll back**,
+  **Stop** and **Start** buttons that ask you first (type the service name when the site can be down for a few
+  seconds).
 - **Protected services**: mark a production service read-only on the page; the page and `dokploy.py` then refuse to
   deploy, rebuild it or add a domain to it, and only the page can lift it.
 - **A skill for Claude sessions**: Claude lists what runs, reads why a deployment failed, deploys, adds a domain or
@@ -21,8 +22,8 @@ behind Dokploy's Traefik with `maxxing proxy`).
 ## Requirements
 
 - Harness Maxxing with page extensions (extension contract `"api": 1`).
-- A Dokploy you can reach from the Harness server (tested with Dokploy v0.30.10), and an API key from
-  **Dokploy -> Profile -> API keys**.
+- A Dokploy you can reach from the Harness server (tested with Dokploy v0.30.10), and an API key from **Dokploy ->
+  Profile -> API keys**.
 
 ## Install
 
@@ -50,27 +51,27 @@ Reload**.
 ## What it sends, and where
 
 - **Only to the Dokploy address you checked on the page**: Dokploy API calls (`GET|POST <address>/api/<procedure>`)
-  with your key in the `x-api-key` header. Reads: `project.all`, `application.one`, `compose.one`,
-  `deployment.all`, `deployment.allByCompose`, `docker.getContainersByAppNameMatch`,
-  `docker.getStackContainersByAppName`. Writes, each only after you agree: `application.deploy` /
-  `redeploy`, `compose.deploy` / `redeploy`, `domain.create`, `application.create`, `application.saveGitProvider`,
+  with your key in the `x-api-key` header. Reads: `project.all`, `application.one`, `compose.one`, `deployment.all`,
+  `deployment.allByCompose`, `docker.getContainersByAppNameMatch`, `docker.getStackContainersByAppName`. Writes, each
+  only after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` / `stop` /
+  `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
-- Nothing else, to nobody else: no telemetry, no other host. Redirects are not followed, so the key is never sent
-  to another address.
+- Nothing else, to nobody else: no telemetry, no other host. Redirects are not followed, so the key is never sent to
+  another address.
 - Plain `http://` is accepted only for this machine, a private network or a Tailscale address; anything else needs
   `https://`.
 
 ## How the key is kept
 
-- The key lives only in **Settings -> Keys** (`DOKPLOY_API_KEY`). The page's `api.py` reads it with
-  `ctx.secret()`; the session script reads it with `maxxing keys get` inside its own process, for each call. It is
-  never written in this folder, never printed, and never put in the environment of sessions.
+- The key lives only in **Settings -> Keys** (`DOKPLOY_API_KEY`). The page's `api.py` reads it with `ctx.secret()`;
+  the session script reads it with `maxxing keys get` inside its own process, for each call. It is never written in
+  this folder, never printed, and never put in the environment of sessions.
 - The extension's state folder (`/var/lib/claude-maxxing/extensions/dokploy/settings.json`, root only) keeps the
-  Dokploy address, a fingerprint of the key it was checked with (never the key) and the protected services. A key changed in Keys is not
-  used until you check it again on the page.
+  Dokploy address, a fingerprint of the key it was checked with (never the key) and the protected services. A key
+  changed in Keys is not used until you check it again on the page.
 - The script warns when `DOKPLOY_API_KEY` is exposed to sessions.
-- Claude sessions run as root on a standard install: these rules keep the key out of their environment, prompts
-  and output, they are not a wall against a session that sets out to read the vault.
+- Claude sessions run as root on a standard install: these rules keep the key out of their environment, prompts and
+  output, they are not a wall against a session that sets out to read the vault.
 
 ## For Claude sessions
 
@@ -86,11 +87,12 @@ python3 $D health APP [--json]
 python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D domain list APP
 python3 $D deploy|redeploy APP --yes
+python3 $D stop|start|rollback APP --yes
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build T] --yes
 ```
 
-A protected service refuses deploy, redeploy and domain add, even with `--yes`, and the script has no command to lift
+A protected service refuses deploy, redeploy, stop, start, rollback and domain add, even with `--yes`, and the script has no command to lift
 the protection. Like `--yes`, it guards the page and the commands Claude is told to use; it is not a lock against a
 root session set on going around it.
 Every write needs `--yes`, which the skill tells Claude to add only after you agreed; without it the command stops

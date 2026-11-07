@@ -36,6 +36,7 @@ PROJECTS = [
                         "repository": "web",
                         "sourceType": "github",
                         "replicas": 1,
+                        "rollbackActive": True,
                         "updateConfigSwarm": {"Order": "start-first", "Parallelism": 1},
                         "domains": [{"host": "web.example.com", "https": True, "port": 3000, "path": "/"}],
                     },
@@ -170,11 +171,20 @@ class FakeDokploy:
         if proc == "deployment.all":
             return 200, [
                 {
+                    "deploymentId": "d0",
+                    "title": "first",
+                    "status": "done",
+                    "createdAt": "2026-09-01T10:00:00+02:00",
+                    "logPath": None,
+                    "rollbackId": "r0",
+                },
+                {
                     "deploymentId": "d1",
                     "title": "old",
                     "status": "done",
                     "createdAt": "2026-10-01T10:00:00Z",
                     "logPath": str(self.logs / "acme-web-x1" / "d1.log"),
+                    "rollbackId": "r1",
                 },
                 {
                     "deploymentId": "d2",
@@ -192,6 +202,11 @@ class FakeDokploy:
             "domain.create",
             "application.saveGitProvider",
             "application.saveBuildType",
+            "application.stop",
+            "application.start",
+            "compose.stop",
+            "compose.start",
+            "rollback.rollback",
         ):
             return 200, b""
         return 404, {"message": "no such procedure"}
