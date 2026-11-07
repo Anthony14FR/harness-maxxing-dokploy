@@ -222,6 +222,61 @@ def client(state_dir: str | Path, secret: Secret) -> Client:
     return Client(s["url"], key)
 
 
+# ---- the skill sessions read ---------------------------------------------------------------------------------
+SKILL_SRC = Path(__file__).resolve().parent / "skill" / "dokploy"
+
+
+def skill_dest(workspace: str | Path) -> Path:
+    return Path(workspace) / ".claude" / "skills" / "dokploy"
+
+
+def _files(d: Path) -> dict[str, bytes]:
+    return {f.name: f.read_bytes() for f in d.iterdir() if f.is_file()} if d.is_dir() else {}
+
+
+def skill_state(workspace: str | Path | None) -> str:
+    """ok, missing, stale, linked (elsewhere: left alone) or broken (nothing shipped); never raises."""
+    try:
+        src, dest = _files(SKILL_SRC), skill_dest(workspace)
+        if not src:
+            return "broken"
+        if dest.is_symlink() and dest.resolve() != SKILL_SRC:
+            return "linked"
+        if not (dest / "SKILL.md").is_file():
+            return "missing"
+        have = {n: (dest / n).read_bytes() if (dest / n).is_file() else None for n in src}
+        return "ok" if have == src else "stale"
+    except (OSError, TypeError, ValueError):
+        return "missing"
+
+
+def install_skill(workspace: str | Path) -> Path:
+    """Writes the shipped skill files into <workspace>/.claude/skills/dokploy; other files there are never touched."""
+    dest = skill_dest(workspace)
+    if dest.is_symlink():
+        if dest.resolve() == SKILL_SRC:
+            return dest  # already linked to this folder (Harness may link extension skills itself)
+        raise DokployError("skill_linked", f"{dest} links somewhere else: remove that link first")
+    try:
+        src = _files(SKILL_SRC)
+        if not src:
+            raise DokployError("skill_failed", f"{SKILL_SRC} is empty: update the extension (git pull)")
+        dest.mkdir(parents=True, exist_ok=True)
+        for name, data in src.items():
+            fd, tmp = tempfile.mkstemp(dir=dest, prefix=f".{name}-")
+            try:
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(data)
+                os.chmod(tmp, 0o644)
+                os.replace(tmp, dest / name)  # atomic, and replaces a link instead of writing through it
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
+    except OSError as e:
+        raise DokployError("skill_failed", f"cannot copy the skill to {dest}: {e.strerror or e}") from None
+    return dest
+
+
 # ---- HTTP ----------------------------------------------------------------------------------------------------
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a: Any, **k: Any) -> None:

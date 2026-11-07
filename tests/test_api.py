@@ -14,7 +14,7 @@ def api():
 def ctx(state, keys):
     return {
         "id": "dokploy",
-        "workspace": "/tmp/ws",
+        "workspace": str(state.parent.parent / "ws"),
         "state_dir": str(state),
         "secret": keys.get,
         "config": {"timezone": "UTC", "language": "en", "public_url": ""},
@@ -132,3 +132,22 @@ def test_actions_from_the_page(api, fake, state):
     api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "a1", "on": True})
     code, err = api.handle(ctx(state, keys), "POST", "action", {}, body)
     assert code == 409 and err["error"] == "protected" and len(fake.writes()) == n
+
+
+def test_the_page_offers_and_installs_the_skill(api, state):
+    keys = {}
+    assert api.handle(ctx(state, keys), "GET", "status", {}, None)["skill"] == "missing"
+    assert api.handle(ctx(state, keys), "POST", "skill", {}, None) == {"skill": "ok"}
+    assert (state.parent.parent / "ws" / ".claude" / "skills" / "dokploy" / "SKILL.md").is_file()
+
+
+def test_skill_errors_from_the_page(api, state):
+    keys = {}
+    ws = state.parent.parent / "ws"
+    (ws / ".claude").mkdir(parents=True)
+    (ws / ".claude" / "skills").write_text("not a folder")
+    code, err = api.handle(ctx(state, keys), "POST", "skill", {}, None)
+    assert code == 409 and err["error"] == "skill_failed"
+    no_ws = {**ctx(state, keys), "workspace": None}
+    assert api.handle(no_ws, "GET", "status", {}, None)["skill"] == "missing"
+    assert api.handle(no_ws, "POST", "skill", {}, None)[0] == 409

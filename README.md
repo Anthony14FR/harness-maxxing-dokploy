@@ -22,8 +22,9 @@ behind Dokploy's Traefik with `maxxing proxy`).
 ## Requirements
 
 - Harness Maxxing with page extensions (extension contract `"api": 1`).
-- A Dokploy you can reach from the Harness server (tested with Dokploy v0.30.10), and an API key from **Dokploy ->
-  Profile -> API keys**.
+- A Dokploy you can reach from the Harness server (tested with Dokploy v0.30.10) and an API key. In Dokploy v0.30:
+  **Settings -> Profile** (`/dashboard/settings/profile`), block **API/CLI Keys**, **Generate New Key**. The key is
+  shown only once: copy it right away.
 
 ## Install
 
@@ -35,18 +36,28 @@ behind Dokploy's Traefik with `maxxing proxy`).
 
    (`/root/maxxing` is the default workspace: use yours if you changed it. The folder must be named `dokploy`.)
 2. **Settings -> Extensions -> Reload**, then open **Dokploy** under Extensions (pin it to keep it in the sidebar).
-3. **Settings -> Keys**: add `DOKPLOY_API_KEY` with your Dokploy API key and **keep it out of the environment of
-   sessions** (not exposed).
+3. **Settings -> Keys -> Add a key**: name `DOKPLOY_API_KEY`, your Dokploy API key as the value, and leave
+   **Expose to Harness sessions** off (the default): the extension reads the key without it.
 4. On the Dokploy page, check the address (default `http://127.0.0.1:3000`, Dokploy on the same server) and click
    **Check and connect**.
-5. For Claude sessions, copy the skill (Claude Code does not read skills from extension folders):
+5. For Claude sessions, click **Install the skill for sessions** on the Dokploy page, or run:
 
    ```bash
-   mkdir -p /root/maxxing/.claude/skills && cp -r /root/maxxing/extensions/dokploy/skill/dokploy /root/maxxing/.claude/skills/
+   python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
    ```
 
-To update: `git -C /root/maxxing/extensions/dokploy pull`, copy the skill again, then **Settings -> Extensions ->
-Reload**.
+   Claude Code does not read skills from extension folders: this copies the files of `skill/dokploy` to
+   `/root/maxxing/.claude/skills/dokploy/`. Other files in that folder are left alone, and a link to another folder
+   is refused rather than followed.
+
+To update:
+
+```bash
+git -C /root/maxxing/extensions/dokploy pull && python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
+```
+
+then **Settings -> Extensions -> Reload**. The page and `dokploy.py status` say when the sessions' copy of the
+skill is missing or older than the extension.
 
 ## What it sends, and where
 
@@ -80,6 +91,7 @@ The skill teaches Claude these commands (`skill/dokploy/SKILL.md`):
 ```bash
 D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status
+python3 $D install-skill
 python3 $D list [--json]
 python3 $D environments [--json]
 python3 $D deployments APP [--json]

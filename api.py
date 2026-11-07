@@ -25,7 +25,12 @@ def handle(ctx, method, path, query, body):
     body = body if isinstance(body, dict) else {}
     try:
         if path == "status" and method == "GET":
-            return core.status(state, secret)
+            return {**core.status(state, secret), "skill": core.skill_state(ctx.get("workspace"))}
+        if path == "skill" and method == "POST":  # the user's button: copy the skill for Claude sessions
+            if not ctx.get("workspace"):
+                return 409, {"error": "skill_failed", "message": "Harness gave no workspace"}
+            core.install_skill(ctx["workspace"])
+            return {"skill": core.skill_state(ctx["workspace"])}
         if path == "connect" and method == "POST":
             return core.connect(state, secret, str(body.get("url") or ""))
         if path == "disconnect" and method == "POST":
@@ -89,6 +94,8 @@ def handle(ctx, method, path, query, body):
             "not_supported": 409,
             "deploy_in_progress": 409,
             "target_changed": 409,
+            "skill_linked": 409,
+            "skill_failed": 409,
             "not_found": 404,
         }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}

@@ -116,3 +116,17 @@ def test_stop_start_rollback_from_a_session(connected, core, state, fake, capsys
         assert code == 2 and "protected" in err
     code, _, err = run(connected, capsys, "rollback", "stack", "--yes")
     assert code == 2 and "not_supported" in err
+
+
+def test_status_flags_an_old_skill_and_install_skill_fixes_it(connected, tmp_path, capsys):
+    ws = tmp_path / "my-ws"
+    (tmp_path / "state" / "config.json").write_text(json.dumps({"workspace": str(ws)}))
+    assert "skill of sessions is missing" in run(connected, capsys, "status")[2]
+    code, out, _ = run(connected, capsys, "install-skill")
+    assert code == 0 and str(ws / ".claude" / "skills" / "dokploy") in out
+    assert "skill" not in run(connected, capsys, "status")[2]
+
+
+def test_a_bad_workspace_setting_falls_back(cli, tmp_path):
+    (tmp_path / "state" / "config.json").write_text(json.dumps({"workspace": 5}))
+    assert str(cli.workspace()) == "/root/maxxing"

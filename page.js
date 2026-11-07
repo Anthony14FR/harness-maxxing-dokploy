@@ -3,7 +3,9 @@ const T = {
   en: {
     title: "Dokploy",
     intro: "Your Dokploy projects, apps and domains. Sessions deploy through it with the dokploy skill, asking you first.",
-    keyMissing: "Add your Dokploy API key in Settings -> Keys as DOKPLOY_API_KEY (Dokploy -> Profile -> API keys), and keep it out of the environment of sessions. Then check it here.",
+    keyMissing: "Add your Dokploy API key in Settings -> Keys as DOKPLOY_API_KEY, with “Expose to Harness sessions” left off. In Dokploy v0.30: Settings -> Profile (/dashboard/settings/profile), API/CLI Keys, Generate New Key; it is shown only once, copy it right away. Then check it here.",
+    skill: { missing: "Claude sessions do not have the dokploy skill yet.", stale: "The dokploy skill of Claude sessions is older than this extension.", broken: "This extension's skill folder is empty: update the extension (git pull)." },
+    skillButton: "Install the skill for sessions", skillDone: "Skill installed for Claude sessions.",
     keyChanged: "DOKPLOY_API_KEY changed in Settings -> Keys: check it again before it is used.",
     url: "Dokploy address", check: "Check and connect", disconnect: "Disconnect", refresh: "Refresh",
     connected: "Connected to", projects: "projects", empty: "Nothing in Dokploy yet.",
@@ -28,7 +30,9 @@ const T = {
   fr: {
     title: "Dokploy",
     intro: "Vos projets, apps et domaines Dokploy. Les sessions déploient avec le skill dokploy, en vous demandant d’abord.",
-    keyMissing: "Ajoutez votre clé API Dokploy dans Réglages -> Clés sous le nom DOKPLOY_API_KEY (Dokploy -> Profile -> API keys), sans l’exposer aux sessions. Vérifiez-la ensuite ici.",
+    keyMissing: "Ajoutez votre clé API Dokploy dans Réglages -> Clés sous le nom DOKPLOY_API_KEY, avec « Fournir aux sessions Harness » désactivé. Dans Dokploy v0.30 : Settings -> Profile (/dashboard/settings/profile), API/CLI Keys, Generate New Key ; elle ne s’affiche qu’une fois, copiez-la tout de suite. Vérifiez-la ensuite ici.",
+    skill: { missing: "Les sessions Claude n’ont pas encore le skill dokploy.", stale: "Le skill dokploy des sessions Claude est plus ancien que cette extension.", broken: "Le dossier du skill de cette extension est vide : mettez l’extension à jour (git pull)." },
+    skillButton: "Installer le skill pour les sessions", skillDone: "Skill installé pour les sessions Claude.",
     keyChanged: "DOKPLOY_API_KEY a changé dans Réglages -> Clés : vérifiez-la à nouveau avant qu’elle serve.",
     url: "Adresse de Dokploy", check: "Vérifier et connecter", disconnect: "Déconnecter", refresh: "Actualiser",
     connected: "Connecté à", projects: "projets", empty: "Rien dans Dokploy pour l’instant.",
@@ -70,9 +74,10 @@ export function mount(el, ctx) {
   const t = T[ctx.lang] || T.en;
   let alive = true;
   const notice = h("div", { class: "ui-callout", hidden: true });
+  const skillBar = h("div", { class: "ui-callout ui-warning ui-row", hidden: true, style: "flex-wrap:wrap;gap:8px" });
   const body = h("div", { class: "ui-stack" });
   el.replaceChildren(h("div", { class: "ui-page", style: "max-width:1100px" },
-    h("h1", { class: "ui-h1" }, t.title), h("p", { class: "ui-muted" }, t.intro), notice, body));
+    h("h1", { class: "ui-h1" }, t.title), h("p", { class: "ui-muted" }, t.intro), notice, skillBar, body));
 
   const say = (text, kind = "ui-info") => {
     notice.className = `ui-callout ${kind}`;
@@ -219,6 +224,20 @@ export function mount(el, ctx) {
       h("thead", {}, h("tr", {}, t.cols.map((c) => h("th", {}, c)))), h("tbody", {}, rows))), slot);
   }
 
+  function showSkill(state) {  // Claude Code reads a copy in the workspace: offer to refresh it
+    skillBar.hidden = !t.skill[state];
+    if (skillBar.hidden) return;
+    const btn = h("button", { class: "ui-btn ui-sm", onclick: async () => {
+      btn.disabled = true;
+      try {
+        const r = await ctx.api("skill", { method: "POST" });
+        showSkill(r.skill);
+        say(t.skillDone, "ui-success");
+      } catch (e) { fail(e); btn.disabled = false; }
+    } }, t.skillButton);
+    skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), state === "broken" ? null : btn);
+  }
+
   let generation = 0;
   async function load() {
     generation += 1;
@@ -226,6 +245,7 @@ export function mount(el, ctx) {
     try {
       const st = await ctx.api("status");
       if (!alive) return;
+      showSkill(st.skill);
       if (!st.connected) {
         if (!st.key_present) say(t.keyMissing, "ui-warning");
         else if (st.key_changed) say(t.keyChanged, "ui-warning");

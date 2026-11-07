@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The skill stays up to date** (#4): `dokploy.py install-skill` and an **Install the skill for sessions** button copy
+  it to the workspace; the page and `dokploy.py status` say when that copy is missing or older than the extension.
+- **Clearer setup** (#4): where Dokploy v0.30 makes the API key (shown only once), and the real Harness setting to
+  leave off (**Expose to Harness sessions**).
 - **Roll back, stop and start** (#3): on the page and with `dokploy.py rollback|stop|start APP --yes`. A rollback goes
   back to the successful deployment before the one running now (a failed deploy leaves the previous one running), only
   for applications with rollbacks turned on in Dokploy and never during a deployment; it says which one before asking,

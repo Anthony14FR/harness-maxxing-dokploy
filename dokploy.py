@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Deploy through Dokploy from a Claude session; the key is read from Harness Keys for each call, never printed.
 
-    dokploy.py status
+    dokploy.py status                                         also says when the sessions' skill copy is out of date
+    dokploy.py install-skill                                  copy skill/dokploy to <workspace>/.claude/skills/
     dokploy.py list [--json]                                  projects, apps, compose stacks, databases, domains
     dokploy.py environments [--json]                          where `app create` can put an app
     dokploy.py deploy|redeploy APP --yes [--title T]          APP = id, name or app name
@@ -53,6 +54,16 @@ def _maxxing(*args: str) -> subprocess.CompletedProcess:
     )
 
 
+def workspace() -> Path:
+    """Harness's workspace, from its config.json (the default one when it says nothing)."""
+    try:
+        cfg = json.loads((state_dir().parent.parent / "config.json").read_text())
+    except (OSError, ValueError):
+        cfg = {}
+    ws = cfg.get("workspace") if isinstance(cfg, dict) else None
+    return Path(ws if isinstance(ws, str) and ws else "/root/maxxing")
+
+
 def secret(name: str) -> str | None:
     """The key from Harness Keys, kept in this process only (never printed, never in the environment)."""
     try:
@@ -75,6 +86,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dokploy.py", description="Deploy through Dokploy (Harness Maxxing extension).")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("status", help="connected or not, and the address")
+    sub.add_parser("install-skill", help="copy the skill to the workspace, where Claude Code reads it")
     for name, what in (
         ("list", "projects, apps, stacks, databases and their domains"),
         ("environments", "projects and environments, with the ids app create needs"),
@@ -156,7 +168,15 @@ def _urls(s: dict) -> str:
 
 def run(a: argparse.Namespace) -> int:
     st = state_dir()
+    if a.action == "install-skill":
+        print(f"skill copied to {core.install_skill(workspace())}")
+        return 0
     if a.action == "status":
+        sk = core.skill_state(workspace())
+        if sk in ("missing", "stale"):
+            print(f"warning: the dokploy skill of sessions is {sk}: dokploy.py install-skill", file=sys.stderr)
+        elif sk == "broken":
+            print("warning: this extension's skill folder is empty: git pull", file=sys.stderr)
         s = core.status(st, secret)
         state = (
             "connected"
