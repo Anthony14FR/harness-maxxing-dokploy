@@ -95,3 +95,15 @@ def test_protect_needs_a_real_service_but_lifting_does_not(api, fake, state):
         "protected": False,
     }
     assert api.handle(ctx(state, keys), "POST", "protect", {}, {"id": "gone", "on": False})["protected"] is False
+
+
+def test_health_route(api, fake, state):
+    keys = {"DOKPLOY_API_KEY": KEY}
+    api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state, keys), "GET", "health", {"id": "stack"}, None)["state"] == "partial"
+
+
+def test_health_of_an_unknown_service(api, fake, state):
+    keys = {"DOKPLOY_API_KEY": KEY}
+    api.handle(ctx(state, keys), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state, keys), "GET", "health", {"id": "nope"}, None)[0] == 404

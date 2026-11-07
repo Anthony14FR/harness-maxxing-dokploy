@@ -5,8 +5,8 @@ for [Harness Maxxing](https://github.com/makushingu/harness-maxxing) that connec
 [Dokploy](https://dokploy.com):
 
 - **A Dokploy page** in Harness: your projects, applications, compose stacks, databases and domains with their
-  state, the last deployment log, and **Deploy** / **Rebuild** buttons that ask you first (type the service name
-  when the site can be down for a few seconds).
+  last deployment, the containers really running and the last deployment log, and **Deploy** / **Rebuild** buttons
+  that ask you first (type the service name when the site can be down for a few seconds).
 - **Protected services**: mark a production service read-only on the page; the page and `dokploy.py` then refuse to
   deploy, rebuild it or add a domain to it, and only the page can lift it.
 - **A skill for Claude sessions**: Claude lists what runs, reads why a deployment failed, deploys, adds a domain or
@@ -51,7 +51,8 @@ Reload**.
 
 - **Only to the Dokploy address you checked on the page**: Dokploy API calls (`GET|POST <address>/api/<procedure>`)
   with your key in the `x-api-key` header. Reads: `project.all`, `application.one`, `compose.one`,
-  `deployment.all`, `deployment.allByCompose`. Writes, each only after you agree: `application.deploy` /
+  `deployment.all`, `deployment.allByCompose`, `docker.getContainersByAppNameMatch`,
+  `docker.getStackContainersByAppName`. Writes, each only after you agree: `application.deploy` /
   `redeploy`, `compose.deploy` / `redeploy`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
 - Nothing else, to nobody else: no telemetry, no other host. Redirects are not followed, so the key is never sent
@@ -81,6 +82,7 @@ python3 $D status
 python3 $D list [--json]
 python3 $D environments [--json]
 python3 $D deployments APP [--json]
+python3 $D health APP [--json]
 python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D domain list APP
 python3 $D deploy|redeploy APP --yes

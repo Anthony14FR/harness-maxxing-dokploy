@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Containers, not just the last deployment** (#2): the page's first column is now "Last deployment", and a new
+  "Containers" column shows what really runs (running / expected: running, partly down, down, stopped, or
+  unknown when Dokploy cannot tell); `dokploy.py health APP`
+  does the same for sessions, one service at a time and at most 4 requests at once from the page. A one-shot
+  container that exited cleanly does not count as down. `list --json` adds `last_deployment`; `status` is
+  deprecated and stays for 1.x scripts.
+- **Faster single-service commands**: deploy, logs, health and the page's actions read one service instead of the
+  whole inventory.
+- CI checks `page.js` as an ES module (`node --check` on a `.js` file let a syntax error through).
 - **Protected services** (#1): mark a service read-only on the page; the page and `dokploy.py` refuse to deploy,
   rebuild it or add a domain to it, and only the page can lift it (kept across disconnect / reconnect; an
   unreadable settings file refuses every write instead of opening them).

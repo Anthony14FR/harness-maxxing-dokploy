@@ -274,3 +274,81 @@ def test_no_update_config_means_stop_first(core):
     app = {"kind": "application", "source": "git", "start_first": None, "detailed": True}
     assert core.risks(app) == ["downtime"]
     assert core.risks({**app, "start_first": True, "source": "docker"}) == ["no_rebuild"]
+
+
+def test_health_counts_only_this_service_real_containers(core, fake):
+    c = core.Client(fake.url, KEY)
+    svcs = core.inventory(c)
+    a1 = core.health(c, core.find(svcs, "a1"))
+    assert (a1["state"], a1["running"], a1["expected"]) == ("ok", 1, 1)
+    assert [b["name"] for b in a1["containers"]] == ["acme-web-x1.1.abc"]  # not the prefix-sharing sibling
+    assert core.health(c, core.find(svcs, "a2"))["state"] == "down"
+    stack = core.health(c, core.find(svcs, "c1"))
+    assert (stack["state"], stack["running"], stack["expected"]) == ("partial", 1, 2)  # migrate exited 0: not down
+    assert {b["name"] for b in stack["containers"]} == {
+        "acme-stack-web-1",
+        "acme-stack-worker-1",
+        "acme-stack-migrate-1",
+    }
+    assert ("GET", "docker.getContainersByAppNameMatch", {"appName": "acme-stack", "appType": "docker-compose"}) in (
+        fake.calls
+    )
+    with pytest.raises(core.DokployError):
+        core.health(c, core.find(svcs, "pg1"))
+
+
+def test_health_of_a_swarm_stack_counts_slots(core, fake):
+    c = core.Client(fake.url, KEY)
+    c1 = core.find(core.inventory(c), "c1")
+    swarm = core.health(c, {**c1, "compose_type": "stack", "server_id": "srv1"})
+    assert (swarm["state"], swarm["running"], swarm["expected"]) == ("partial", 1, 2)  # web up, worker failed
+    assert fake.calls[-1][1:] == ("docker.getStackContainersByAppName", {"appName": "acme-stack", "serverId": "srv1"})
+
+
+def test_health_replicas_and_edge_cases(core, fake):
+    c = core.Client(fake.url, KEY)
+    a1 = core.find(core.inventory(c), "a1")
+    assert core.health(c, {**a1, "replicas": 2})["state"] == "partial"
+    assert core.health(c, {**a1, "replicas": 0})["state"] == "stopped"
+    assert core.health(c, {**a1, "replicas": None, "detailed": False})["expected"] == 1  # Dokploy's default
+    assert core.health(c, {**a1, "app_name": None}) == {
+        "state": "unknown",
+        "running": 0,
+        "expected": None,
+        "containers": [],
+    }
+    core.health(c, {**a1, "server_id": "srv2"})
+    assert fake.calls[-1][2] == {"appName": "acme-web-x1", "serverId": "srv2"}
+
+
+def test_lookup_reads_one_service_not_the_inventory(core, fake):
+    c = core.Client(fake.url, KEY)
+    fake.calls.clear()
+    assert core.lookup(c, "stack")["source"] == "raw"
+    assert [x[1] for x in fake.calls] == ["project.all", "compose.one"]
+
+
+def test_last_deployment_is_named_as_such(core, fake):
+    a2 = core.find(core.inventory(core.Client(fake.url, KEY)), "a2")
+    assert a2["last_deployment"] == a2["status"] == "error"
+
+
+def test_health_unknown_and_stopped_composes(core, fake):
+    c = core.Client(fake.url, KEY)
+    c1 = core.find(core.inventory(c), "c1")
+    assert core.health(c, {**c1, "app_name": "custom-names"})["state"] == "unknown"  # no container matched
+    from conftest import CONTAINERS
+
+    CONTAINERS["all-done"] = [{"name": "all-done-job-1", "state": "exited", "status": "Exited (0) 1 day ago"}]
+    try:
+        assert core.health(c, {**c1, "app_name": "all-done"})["state"] == "stopped"
+    finally:
+        del CONTAINERS["all-done"]
+
+
+def test_lookup_falls_back_to_app_names_and_keeps_ambiguity(core, fake):
+    c = core.Client(fake.url, KEY)
+    assert core.lookup(c, "acme-api-x2")["id"] == "a2"
+    with pytest.raises(core.DokployError) as e:
+        core.lookup(c, "web")
+    assert e.value.code == "ambiguous"

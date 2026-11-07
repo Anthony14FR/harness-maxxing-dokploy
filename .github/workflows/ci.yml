@@ -24,4 +24,4 @@ jobs:
         with:
           node-version: "22"
       - name: page.js syntax
-        run: node --check page.js
+        run: cp page.js "$RUNNER_TEMP/page.mjs" && node --check "$RUNNER_TEMP/page.mjs"  # .js hides ESM syntax errors

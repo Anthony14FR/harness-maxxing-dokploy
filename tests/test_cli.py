@@ -91,3 +91,10 @@ def test_the_question_carries_the_risks(connected, capsys):
     assert "down for a few seconds" in err
     err = run(connected, capsys, "deploy", "a1")[2]
     assert "tell the user" not in err
+
+
+def test_health_and_the_list_header(connected, capsys):
+    code, out, _ = run(connected, capsys, "health", "stack")
+    assert code == 0 and out.startswith("partial  1/2 running") and "Exited (1)" in out
+    assert json.loads(run(connected, capsys, "health", "a1", "--json")[1])["state"] == "ok"
+    assert run(connected, capsys, "list")[1].splitlines()[0].startswith("done ")  # no header: 1.x scripts parse it

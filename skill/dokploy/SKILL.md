@@ -15,6 +15,7 @@ python3 $D status                       # connected? (if not: the user opens the
 python3 $D list [--json]                # projects, apps, compose stacks, databases, their state and domains
 python3 $D environments [--json]        # environment ids, for app create
 python3 $D deployments APP [--json]     # newest first
+python3 $D health APP [--json]          # containers really running: check this, not the list, for "is it up?"
 python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D domain list APP
 python3 $D deploy APP --yes             # or redeploy (rebuild)
@@ -31,6 +32,9 @@ python3 $D app create --environment ID --name N --repo URL [--branch B] [--build
   and domain add are refused (`protected`). Never look for a way around it: only the user lifts it, on the Dokploy page in Harness.
 - **Say the risks before asking.** A deploy without `--yes` prints them (`tell the user: ...`): a compose stack or an
   app that is not start-first is down for a few seconds; a service with no git source rebuilds nothing.
+- **`list` shows the last deployment, not whether the site is up**: `done` can hide a container that died since.
+  To answer "is it up?", run `health APP`: `ok`, `partial` (some containers down), `down`, `stopped` (0 replicas
+  wanted, or every container exited cleanly) or `unknown` (Dokploy cannot match its containers: check in Dokploy), with running / expected containers. It always exits 0: read the first word.
 - APP is the id, the name or the app name from `list`; a name used in two projects needs the id.
 - A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`,
   `ssh://` or `git@host:path`. A domain also needs its DNS pointing to the server, then a redeploy.

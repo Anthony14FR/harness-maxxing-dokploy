@@ -35,6 +35,7 @@ PROJECTS = [
                         "owner": "acme",
                         "repository": "web",
                         "sourceType": "github",
+                        "replicas": 1,
                         "updateConfigSwarm": {"Order": "start-first", "Parallelism": 1},
                         "domains": [{"host": "web.example.com", "https": True, "port": 3000, "path": "/"}],
                     },
@@ -68,6 +69,20 @@ PROJECTS = [
         "applications": [{"applicationId": "a3", "name": "web", "appName": "old-web", "applicationStatus": "idle"}],
     },
 ]
+
+
+CONTAINERS = {
+    "acme-web-x1": [
+        {"containerId": "1", "name": "acme-web-x1.1.abc", "state": "running", "status": "Up 2 hours"},
+        {"containerId": "9", "name": "acme-web-x1-admin.1.zz", "state": "running", "status": "Up"},  # another app
+    ],
+    "acme-stack": [
+        {"containerId": "2", "name": "acme-stack-web-1", "state": "running", "status": "Up 1 hour"},
+        {"containerId": "3", "name": "acme-stack-worker-1", "state": "exited", "status": "Exited (1) 5 minutes ago"},
+        {"containerId": "4", "name": "acme-stack-migrate-1", "state": "exited", "status": "Exited (0) 1 hour ago"},
+        {"containerId": "5", "name": "acme-stacker-web-1", "state": "running", "status": "Up"},  # another stack
+    ],
+}
 
 
 def _all(plural):
@@ -142,6 +157,14 @@ class FakeDokploy:
         if proc in ("application.one", "compose.one"):
             key, plural = ("applicationId", "applications") if proc == "application.one" else ("composeId", "compose")
             return next(((200, x) for x in _all(plural) if x[key] == data.get(key)), (404, {"message": "not found"}))
+        if proc == "docker.getContainersByAppNameMatch":
+            return 200, CONTAINERS.get(data.get("appName"), [])
+        if proc == "docker.getStackContainersByAppName":
+            return 200, [
+                {"name": f"{data['appName']}_web.1", "state": "running", "currentState": "Running 2 hours ago"},
+                {"name": f"{data['appName']}_web.1", "state": "shutdown", "currentState": "Shutdown 2 hours ago"},
+                {"name": f"{data['appName']}_worker.1", "state": "shutdown", "currentState": "Failed 1 minute ago"},
+            ]
         if proc == "application.create":
             return 200, {"applicationId": "new1", "name": data["name"]}
         if proc == "deployment.all":

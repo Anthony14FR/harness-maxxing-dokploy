@@ -6,12 +6,14 @@
     dokploy.py environments [--json]                          where `app create` can put an app
     dokploy.py deploy|redeploy APP --yes [--title T]          APP = id, name or app name
     dokploy.py deployments APP [--json]
+    dokploy.py health APP [--json]                            containers really running (not the last deployment)
     dokploy.py logs APP [--deployment ID] [--lines N]
     dokploy.py domain list APP
     dokploy.py domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
     dokploy.py app create --environment ID --name N --repo URL [--branch B] [--build T] [--build-path P] --yes
 
-Exit codes: 0 ok, 1 nothing found, 2 error, 3 a write without --yes (ask the user first).
+Exit codes: 0 ok, 1 nothing found, 2 error, 3 a write without --yes (ask the user first). `health` exits 0
+whatever the state: read its first word (ok, partial, down, stopped, unknown). `list` shows the last deployment.
 """
 
 from __future__ import annotations
@@ -84,6 +86,9 @@ def parser() -> argparse.ArgumentParser:
     d = sub.add_parser("deployments", help="deployments of an app, newest first")
     d.add_argument("app")
     d.add_argument("--json", action="store_true")
+    hp = sub.add_parser("health", help="containers really running, not the last deployment")
+    hp.add_argument("app")
+    hp.add_argument("--json", action="store_true")
     lg = sub.add_parser("logs", help="log of the last (or a given) deployment")
     lg.add_argument("app")
     lg.add_argument("--deployment")
@@ -171,22 +176,22 @@ def run(a: argparse.Namespace) -> int:
         app_id = core.app_create(c, a.environment, a.name, a.repo, a.branch, a.build, a.build_path)
         print(f"created {a.name} ({app_id}); deploy it with: dokploy.py deploy {app_id} --yes")
         return 0
-    prot = core.protected(st)
-    svcs = [{**s, "protected": s["id"] in prot, "risks": core.risks(s)} for s in core.inventory(c)]
     if a.action == "list":
+        prot = core.protected(st)
+        svcs = [{**s, "protected": s["id"] in prot, "risks": core.risks(s)} for s in core.inventory(c)]
         if a.json:
             print(json.dumps(svcs, indent=2))
         else:
             for s in svcs:
                 where = (s["project"] or "") + (f"/{s['environment']}" if s["environment"] else "")
                 print(
-                    f"{(s['status'] or '-'):<8} {s['kind']:<11} {where[:28]:<28} {s['name'][:28]:<28} "
+                    f"{(s['last_deployment'] or '-'):<8} {s['kind']:<11} {where[:28]:<28} {s['name'][:28]:<28} "
                     f"{s['id']:<24} {_urls(s)}{'  [protected]' if s['protected'] else ''}"
                 )
             if not svcs:
                 print("Nothing in Dokploy yet.")
         return 0
-    svc = core.find(svcs, a.app)
+    svc = core.lookup(c, a.app)
     if a.action in ("deploy", "redeploy") or getattr(a, "sub", None) == "add":
         core.guard(st, svc)  # protected: refused before even asking the user
     if a.action in ("deploy", "redeploy"):
@@ -194,6 +199,16 @@ def run(a: argparse.Namespace) -> int:
             return 3
         core.deploy(c, svc, a.title, again=a.action == "redeploy")
         print(f"{a.action} of {svc['name']} started; follow it with: dokploy.py logs {svc['id']}")
+        return 0
+    if a.action == "health":
+        hl = core.health(c, svc)
+        if a.json:
+            print(json.dumps(hl, indent=2))
+            return 0
+        want = f"/{hl['expected']}" if hl["expected"] is not None else f"/{len(hl['containers'])}"
+        print(f"{hl['state']}  {hl['running']}{want} running")
+        for b in hl["containers"]:
+            print(f"  {(b['state'] or '-'):<10} {b['name']}  {b['status'] or ''}")
         return 0
     if a.action == "deployments":
         deps = core.deployments(c, svc)

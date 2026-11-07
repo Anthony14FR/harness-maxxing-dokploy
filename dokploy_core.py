@@ -302,7 +302,8 @@ def _service(kind: str, s: dict, p: dict, e: dict) -> dict:
         "project_id": p.get("projectId"),
         "environment": e.get("name") if e is not p else None,
         "environment_id": e.get("environmentId"),
-        "status": s.get(_STATUS.get(kind, "applicationStatus")) or None,
+        "status": s.get(_STATUS.get(kind, "applicationStatus")) or None,  # kept for 1.x scripts: last_deployment
+        "last_deployment": s.get(_STATUS.get(kind, "applicationStatus")) or None,
         "domains": [
             {"host": d.get("host"), "https": bool(d.get("https")), "port": d.get("port"), "path": d.get("path") or "/"}
             for d in s.get("domains") or []
@@ -312,6 +313,9 @@ def _service(kind: str, s: dict, p: dict, e: dict) -> dict:
         "build": s.get("buildType") if kind == "application" else None,
         "source": s.get("sourceType") if kind in _PLURAL else None,
         "start_first": _start_first(s) if kind == "application" else None,
+        "replicas": s.get("replicas") if kind == "application" else None,
+        "compose_type": s.get("composeType") if kind == "compose" else None,
+        "server_id": s.get("serverId"),
     }
 
 
@@ -348,36 +352,49 @@ def environments(projects: Any) -> list[dict]:
     ]
 
 
+def detail(c: Client, s: dict) -> dict:
+    """<kind>.one completes an app or stack: project.all (v0.30) gives them only id, name and state."""
+    if s["kind"] not in _PLURAL:
+        return s
+    try:
+        full = c.get(f"{s['kind']}.one", {_ID[s["kind"]]: s["id"]})
+    except DokployError:
+        return {**s, "detailed": False}  # shown with what project.all gave
+    if not isinstance(full, dict):
+        return {**s, "detailed": False}
+    more = _service(
+        s["kind"],
+        {**full, _ID[s["kind"]]: s["id"]},
+        {"name": s["project"], "projectId": s["project_id"]},
+        {"name": s["environment"], "environmentId": s["environment_id"]},
+    )
+    return {
+        **s,
+        **{k: v for k, v in more.items() if v not in (None, [], "") or k == "domains"},
+        "environment": s["environment"],
+        "detailed": True,
+    }
+
+
 def inventory(c: Client) -> list[dict]:
-    """project.all, then <kind>.one of each app and stack: project.all (v0.30) gives them only id, name and state."""
+    """Every service, apps and stacks completed (one call each, 8 at a time)."""
     svcs = services(c.get("project.all"))
-
-    def one(s: dict) -> dict:
-        try:
-            full = c.get(f"{s['kind']}.one", {_ID[s["kind"]]: s["id"]})
-        except DokployError:
-            return {**s, "detailed": False}  # shown with what project.all gave
-        if not isinstance(full, dict):
-            return {**s, "detailed": False}
-        more = _service(
-            s["kind"],
-            {**full, _ID[s["kind"]]: s["id"]},
-            {"name": s["project"], "projectId": s["project_id"]},
-            {"name": s["environment"], "environmentId": s["environment_id"]},
-        )
-        return {
-            **s,
-            **{k: v for k, v in more.items() if v not in (None, [], "") or k == "domains"},
-            "environment": s["environment"],
-            "detailed": True,
-        }
-
     todo = [s for s in svcs if s["kind"] in _PLURAL]
     if todo:
         with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
-            done = {s["id"]: x for s, x in zip(todo, ex.map(one, todo), strict=True)}
+            done = {s["id"]: x for s, x in zip(todo, ex.map(lambda x: detail(c, x), todo), strict=True)}
         svcs = [done.get(s["id"], s) for s in svcs]
     return svcs
+
+
+def lookup(c: Client, ref: str) -> dict:
+    """One service by id or name, completed: project.all plus a single .one call, not the whole inventory."""
+    try:
+        return detail(c, find(services(c.get("project.all")), ref))
+    except DokployError as e:
+        if e.code != "not_found":
+            raise
+    return find(inventory(c), ref)  # an app name (acme-web-x1) is only known after the .one calls
 
 
 def find(svcs: list[dict], ref: str) -> dict:
@@ -498,6 +515,54 @@ def app_create(
 
 
 # ---- reads -----------------------------------------------------------------------------------------------------
+def _mine(name: str, app: str, kind: str) -> bool:
+    """Keeps only this service's containers: Dokploy's name match would also catch another app sharing the prefix."""
+    if kind == "application":
+        return name == app or name.startswith(app + ".")
+    return name.startswith(app + "_") or bool(re.match(rf"^{re.escape(app)}-[A-Za-z0-9._-]+-\d+$", name))
+
+
+def health(c: Client, svc: dict) -> dict:
+    """Containers really running, not the last deployment; state: ok, partial, down, stopped or unknown."""
+    _deployable(svc)
+    app = svc.get("app_name")
+    if not app:
+        return {"state": "unknown", "running": 0, "expected": None, "containers": []}
+    params = {"appName": app, **({"serverId": svc["server_id"]} if svc.get("server_id") else {})}
+    stack = svc["kind"] == "compose" and svc.get("compose_type") == "stack"
+    if svc["kind"] == "compose" and not stack:
+        params["appType"] = "docker-compose"
+    rows = c.get("docker.getStackContainersByAppName" if stack else "docker.getContainersByAppNameMatch", params) or []
+    boxes = [
+        {"name": str(r.get("name") or ""), "state": r.get("state"), "status": r.get("status") or r.get("currentState")}
+        for r in rows
+        if isinstance(r, dict) and _mine(str(r.get("name") or ""), app, svc["kind"])
+    ]
+    if stack:  # swarm keeps old tasks: a slot (service.N) is up when one of its tasks runs
+        slots: dict[str, bool] = {}
+        for b in boxes:
+            if b["state"] != "complete":  # a one-shot task that finished is not a slot to keep up
+                slots[b["name"]] = slots.get(b["name"], False) or b["state"] == "running"
+        running, expected = sum(slots.values()), len(slots)
+        if not slots:
+            return {"state": "unknown", "running": 0, "expected": None, "containers": boxes}
+    else:
+        done = [b for b in boxes if b["state"] == "exited" and str(b["status"] or "").startswith("Exited (0)")]
+        live = [b for b in boxes if b not in done]  # a one-shot that exited cleanly (migration, init) is not down
+        running = sum(b["state"] == "running" for b in live)
+        replicas = svc.get("replicas")  # Dokploy's default is one replica
+        expected = (1 if replicas is None else int(replicas)) if svc["kind"] == "application" else len(live)
+        if svc["kind"] == "compose" and not boxes:  # custom container_name, or nothing created: cannot tell
+            return {"state": "unknown", "running": 0, "expected": None, "containers": []}
+    if expected == 0:  # an app scaled to 0, or a compose whose containers all exited cleanly
+        state = "stopped"
+    elif running == 0:
+        state = "down"
+    else:
+        state = "ok" if running >= expected else "partial"
+    return {"state": state, "running": running, "expected": expected, "containers": boxes}
+
+
 def deployments(c: Client, svc: dict) -> list[dict]:
     """Newest first: {id, title, status, created, log_path}."""
     _deployable(svc)

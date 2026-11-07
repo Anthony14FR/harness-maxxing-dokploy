@@ -39,21 +39,23 @@ def handle(ctx, method, path, query, body):
             svcs = core.inventory(c)
             return {"services": [{**s, "protected": s["id"] in prot, "risks": core.risks(s)} for s in svcs]}
         if path == "protect" and method == "POST":  # the user's own toggle on the page (on: the service must exist)
-            svc = core.find(core.inventory(c), str(body.get("id") or ""))
+            svc = core.lookup(c, str(body.get("id") or ""))
             return {
                 "id": svc["id"],
                 "protected": svc["id"] in core.set_protected(state, svc["id"], bool(body.get("on"))),
             }
         if path == "deploy" and method == "POST":  # the page asked the user before calling it
-            svc = core.find(core.inventory(c), str(body.get("id") or ""))
+            svc = core.lookup(c, str(body.get("id") or ""))
             core.guard(state, svc)
             core.deploy(c, svc, "Harness Maxxing", again=bool(body.get("again")))
             return {"started": svc["id"]}
+        if path == "health" and method == "GET":
+            return core.health(c, core.lookup(c, str(query.get("id") or "")))
         if path == "deployments" and method == "GET":
-            svc = core.find(core.inventory(c), str(query.get("id") or ""))
+            svc = core.lookup(c, str(query.get("id") or ""))
             return {"deployments": [{k: v for k, v in d.items() if k != "log_path"} for d in core.deployments(c, svc)]}
         if path == "log" and method == "GET":
-            svc = core.find(core.inventory(c), str(query.get("id") or ""))
+            svc = core.lookup(c, str(query.get("id") or ""))
             deps = core.deployments(c, svc)
             want = query.get("deployment")
             dep = next((d for d in deps if d["id"] == want), None) if want else (deps[0] if deps else None)

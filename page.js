@@ -10,7 +10,8 @@ const T = {
     deploy: "Deploy", redeploy: "Rebuild", logs: "Last log", close: "Close",
     confirmDeploy: (n) => `Deploy ${n} now?`, confirmRedeploy: (n) => `Rebuild and redeploy ${n} now?`,
     started: (n) => `Deployment of ${n} started.`, noLog: "No deployment yet.",
-    cols: ["State", "Kind", "Project", "Name", "Domains", ""],
+    cols: ["Last deployment", "Containers", "Kind", "Project", "Name", "Domains", ""],
+    health: { ok: "running", partial: "partly down", down: "down", stopped: "stopped", unknown: "unknown" },
     risk: {
       downtime: "Its containers are stopped and started again: the site can be down for a few seconds.",
       no_rebuild: "It has no git source: nothing is rebuilt, the same image starts again.",
@@ -30,7 +31,8 @@ const T = {
     deploy: "Déployer", redeploy: "Reconstruire", logs: "Dernier log", close: "Fermer",
     confirmDeploy: (n) => `Déployer ${n} maintenant ?`, confirmRedeploy: (n) => `Reconstruire et redéployer ${n} maintenant ?`,
     started: (n) => `Déploiement de ${n} lancé.`, noLog: "Aucun déploiement pour l’instant.",
-    cols: ["État", "Type", "Projet", "Nom", "Domaines", ""],
+    cols: ["Dernier déploiement", "Conteneurs", "Type", "Projet", "Nom", "Domaines", ""],
+    health: { ok: "en marche", partial: "en partie arrêté", down: "en panne", stopped: "arrêté", unknown: "inconnu" },
     risk: {
       downtime: "Ses conteneurs sont arrêtés puis relancés : le site peut être coupé quelques secondes.",
       no_rebuild: "Il n’a pas de source git : rien n’est reconstruit, la même image redémarre.",
@@ -43,6 +45,7 @@ const T = {
 };
 
 const BADGE = { done: "ui-success", running: "ui-success", error: "ui-error", idle: "ui-outline" };
+const HEALTH = { ok: "ui-success", partial: "ui-warning", down: "ui-error", stopped: "ui-outline", unknown: "ui-outline" };
 
 function h(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -123,6 +126,18 @@ export function mount(el, ctx) {
 
   function table(services) {
     const slot = h("div");
+    const waiting = [];
+    let busy = 0;
+    const mine = generation;
+    const queue = (job) => {  // at most 4 health requests at once, dropped when the table is rebuilt
+      waiting.push(job);
+      const next = () => {
+        if (busy >= 4 || !waiting.length || !alive || mine !== generation) return;
+        busy += 1;
+        Promise.resolve().then(waiting.shift()).catch(() => {}).finally(() => { busy -= 1; next(); });
+      };
+      next();
+    };
     const close = () => slot.replaceChildren();
     const deploy = (svc, again) => slot.replaceChildren(confirmPanel(svc,
       (again ? t.confirmRedeploy : t.confirmDeploy)(svc.name),
@@ -145,8 +160,21 @@ export function mount(el, ctx) {
         h("button", { class: "ui-btn ui-sm", onclick: () => deploy(s, false) }, t.deploy), " ",
         h("button", { class: "ui-btn ui-secondary ui-sm", onclick: () => deploy(s, true) }, t.redeploy), " ",
       ] : [];
+      const last = s.last_deployment ?? s.status;
+      const boxes = h("td", {}, deployable ? h("span", { class: "ui-skeleton", style: "display:inline-block;width:64px;height:1em" }) : "-");
+      if (deployable) {
+        queue(() => ctx.api(`health?id=${encodeURIComponent(s.id)}`).then((r) => {
+          if (!alive) return;
+          const count = r.state === "unknown" || r.expected === 0 ? "" : ` ${r.running}/${r.expected ?? r.containers.length}`;
+          boxes.replaceChildren(h("span", {
+            class: `ui-badge ${HEALTH[r.state] || "ui-outline"}`,
+            title: r.containers.map((b) => `${b.name}: ${b.state}${b.status ? ` (${b.status})` : ""}`).join("\n"),
+          }, `${t.health[r.state] || r.state}${count}`));
+        }).catch(() => { if (alive) boxes.replaceChildren(h("span", { class: "ui-badge ui-outline" }, t.health.unknown)); }));
+      }
       return h("tr", {},
-        h("td", {}, h("span", { class: `ui-badge ${BADGE[s.status] || "ui-outline"}` }, s.status || "-")),
+        h("td", {}, h("span", { class: `ui-badge ${BADGE[last] || "ui-outline"}` }, last || "-")),
+        boxes,
         h("td", {}, s.kind),
         h("td", {}, s.project + (s.environment ? ` / ${s.environment}` : "")),
         h("td", {}, h("b", {}, s.name), s.protected ? [" ", h("span", { class: "ui-badge ui-primary", title: t.protectedHelp }, t.protectedBadge)] : null),
@@ -163,7 +191,9 @@ export function mount(el, ctx) {
       h("thead", {}, h("tr", {}, t.cols.map((c) => h("th", {}, c)))), h("tbody", {}, rows))), slot);
   }
 
+  let generation = 0;
   async function load() {
+    generation += 1;
     body.replaceChildren(h("div", { class: "ui-skeleton", style: "height:120px" }));
     try {
       const st = await ctx.api("status");
