@@ -3,10 +3,12 @@
 ## 1.2.0 - 2026-11-07
 
 - **Updates panel** (#5): **Check for updates** on the Dokploy page shows this extension, Dokploy and Harness. The
-  extension updates itself only when it is clean (no local change, fast-forward, tests passed on GitHub, supported by
-  your Harness) and refreshes the sessions' skill; Dokploy updates after typing `dokploy` (the sites stay up,
-  Dokploy's page is away about two minutes); Harness links to its own Settings -> Updates. Each update runs only the
-  version you confirmed. `dokploy.py updates` lets sessions read it, never run it.
+  extension updates itself only when it is clean (no local change, fast-forward, its GitHub checks passed, supported
+  by your Harness), only to the commit you confirmed, then refreshes the sessions' skill. Dokploy updates itself to
+  its latest release after you type `dokploy` (measured: the sites stay up, Dokploy's page is away about two minutes;
+  a second click is refused while it restarts). Harness links to its own Settings -> Updates. git runs in its own
+  process group with a time budget, so a stuck network never hangs Harness. `dokploy.py updates` lets sessions read
+  it, never run it.
 
 ## 1.1.0 - 2026-11-07
 

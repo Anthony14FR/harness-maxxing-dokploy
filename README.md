@@ -57,12 +57,17 @@ On the Dokploy page, **Updates -> Check for updates** shows, for each part, what
 - **This extension**: **Update** is offered only when it is clean: no file of the extension changed here, the new
   version follows the installed one (fast-forward), its tests passed on GitHub, and it runs with your Harness. It then
   pulls the new version, refreshes the sessions' skill, and the page reloads. Otherwise it says why.
-- **Dokploy**: its version and the latest one; **Update** asks you to type `dokploy`. Measured on a test server
+- **Dokploy**: its version and the latest one; **Update** asks you to type `dokploy`, then Dokploy updates itself to
+  its latest release (it takes no version: a release published in between would be the one installed). A second
+  click within five minutes is refused while Dokploy restarts. Measured on a test server
   (v0.30.10 -> v0.31.0): the sites stay up (Traefik and the apps are not restarted), Dokploy's own page and API are
   away for about two minutes.
 - **Harness Maxxing** updates itself, with its own checks and rollback, in **Settings -> Updates** (linked there).
 
-Each update runs only the exact version you confirmed: if a newer one appeared meanwhile, it asks you to check again.
+The extension updates only to the exact commit you confirmed, from what the check fetched. Its automatic update needs
+a public GitHub repository whose checks passed (this one): a private or non-GitHub copy is shown with the reason and
+is updated by hand. If git says the folder is owned by another user, run the commands below as that user, or
+`git config --global --add safe.directory /root/maxxing/extensions/dokploy`.
 By hand, the same as the extension's button:
 
 ```bash

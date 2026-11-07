@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,13 @@ def release(src, version, api=1, ext_id="dokploy"):
     return git(src, "rev-parse", "HEAD")
 
 
+@pytest.fixture(autouse=True)
+def _plain_git(monkeypatch, tmp_path):
+    """No global or system git config (signing, hooks, aliases) changes what these tests do."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
 @pytest.fixture
 def repo(tmp_path, core, monkeypatch):
     """origin.git, a maintainer's clone (src) and the installed extension (ext), all local."""
@@ -33,7 +41,7 @@ def repo(tmp_path, core, monkeypatch):
     subprocess.run([*GIT, "clone", "-q", str(origin), str(src)], check=True, capture_output=True)
     release(src, "1.0.0")
     subprocess.run([*GIT, "clone", "-q", str(origin), str(ext)], check=True)
-    monkeypatch.setattr(core, "ci_state", lambda url, sha: "success")
+    monkeypatch.setattr(core, "ci_state", lambda *a: "success")
     return {"origin": origin, "src": src, "ext": ext}
 
 
@@ -78,7 +86,7 @@ def test_unclean_updates_are_refused(core, repo, monkeypatch, setup, blocker):
         repo["src"], "2.0.0", api=2 if setup == "api" else 1, ext_id="other" if setup == "other" else "dokploy"
     )
     if setup == "ci":
-        monkeypatch.setattr(core, "ci_state", lambda url, s: "failure")
+        monkeypatch.setattr(core, "ci_state", lambda *a: "failure")
     chk = core.ext_check(repo["ext"])
     assert chk["state"] == "blocked" and blocker in chk["blockers"]
     before = git(repo["ext"], "rev-parse", "HEAD")
@@ -116,8 +124,9 @@ def github(monkeypatch):
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
             sha = self.path.split("/commits/")[1].split("/")[0]
-            data = json.dumps({"check_runs": runs.get(sha, [])}).encode()
-            self.send_response(200)
+            got = runs.get(sha, [])
+            data = json.dumps(got if isinstance(got, dict) else {"total_count": len(got), "check_runs": got}).encode()
+            self.send_response(runs.get("status", 200))
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
@@ -145,24 +154,50 @@ def test_ci_state_reads_github_checks(core, github):
     assert core.ci_state(url, "not-a-sha") == "unknown"
 
 
-def test_dokploy_update_only_to_the_confirmed_version(core, fake):
+def test_dokploy_update_only_to_the_confirmed_version(core, fake, state):
     c = core.Client(fake.url, KEY)
     assert core.dokploy_check(c) == {"current": "v0.30.10", "latest": "v0.31.0", "available": True}
     with pytest.raises(core.DokployError) as e:
-        core.dokploy_update(c, "v0.30.99")
+        core.dokploy_update(c, "v0.30.99", state)
     assert e.value.code == "target_changed" and not [w for w in fake.writes() if w[1] == "settings.updateServer"]
-    core.dokploy_update(c, "v0.31.0")
+    core.dokploy_update(c, "v0.31.0", state)
     assert [w[1] for w in fake.writes()][-1] == "settings.updateServer"
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(c, "v0.31.0", state)  # a second click while Dokploy restarts
+    assert e.value.code == "update_in_progress"
+    (state / "dokploy-update-started").unlink()
     fake.dokploy_latest = "v0.30.10"
     with pytest.raises(core.DokployError) as e:
-        core.dokploy_update(c, "v0.31.0")
+        core.dokploy_update(c, "v0.31.0", state)
     assert e.value.code == "up_to_date"
+
+
+def test_a_dokploy_that_drops_the_request_while_restarting_did_start(core, fake, state):
+    c = core.Client(fake.url, KEY)
+    fake.broken.add("settings.updateServer")
+    with pytest.raises(core.DokployError):
+        core.dokploy_update(c, "v0.31.0", state)  # a real error: not marked as started
+    assert not (state / "dokploy-update-started").exists()
+    fake.broken.clear()
+    real = core.Client.post
+
+    def dropped(self, proc, body):
+        if proc == "settings.updateServer":
+            raise core.DokployError("unreachable", "Dokploy does not answer (RemoteDisconnected)")
+        return real(self, proc, body)
+
+    core.Client.post = dropped
+    try:
+        assert core.dokploy_update(c, "v0.31.0", state)["latest"] == "v0.31.0"
+    finally:
+        core.Client.post = real
+    assert (state / "dokploy-update-started").exists()
 
 
 def test_the_page_checks_and_updates(core, repo, fake, state, monkeypatch, tmp_path):
     api = load("api")
     monkeypatch.setattr(api.core, "EXT_DIR", repo["ext"])
-    monkeypatch.setattr(api.core, "ci_state", lambda url, sha: "success")
+    monkeypatch.setattr(api.core, "ci_state", lambda *a: "success")
     ctx = {
         "id": "dokploy",
         "workspace": str(tmp_path / "ws"),
@@ -193,3 +228,59 @@ def test_sessions_only_read_updates(core, repo, monkeypatch, maxxing_bin, capsys
     with pytest.raises(SystemExit):
         cli.main(["update", "extension"])  # no such command for sessions
     capsys.readouterr()
+
+
+def test_bad_manifests_never_crash_the_check(core, repo, tmp_path):
+    sha = release(repo["src"], "1.1.0")
+    (repo["src"] / "manifest.json").write_text('{"id": "dokploy", "version": "1.2.0", "api": "x"}')
+    git(repo["src"], "commit", "-qam", "bad api")
+    git(repo["src"], "push", "-q", "origin", "main")
+    chk = core.ext_check(repo["ext"])
+    assert chk["state"] == "blocked" and "bad_manifest" in chk["blockers"] and chk["commit"] != sha
+    (repo["src"] / "manifest.json").write_text("[1, 2]")
+    git(repo["src"], "commit", "-qam", "not an object")
+    git(repo["src"], "push", "-q", "origin", "main")
+    assert "not_this_extension" in core.ext_check(repo["ext"])["blockers"]
+    (repo["ext"] / "manifest.json").write_text("{broken")
+    assert core.ext_check(repo["ext"])["state"] == "bad_manifest"
+
+
+def test_a_detached_head_has_no_upstream(core, repo):
+    git(repo["ext"], "checkout", "-q", "--detach")
+    assert core.ext_check(repo["ext"])["state"] == "no_upstream"
+
+
+def test_a_merge_git_refuses_is_reported_and_changes_nothing(core, repo):
+    (repo["src"] / "new.txt").write_text("from the repository")
+    sha = release(repo["src"], "1.1.0")
+    (repo["ext"] / "new.txt").write_text("an untracked local file")  # git will not overwrite it
+    assert core.ext_check(repo["ext"])["state"] == "available"  # the user checked first, as on the page
+    before = git(repo["ext"], "rev-parse", "HEAD")
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, sha)
+    assert e.value.code == "update_failed" and git(repo["ext"], "rev-parse", "HEAD") == before
+
+
+def test_git_is_killed_with_its_children_on_timeout(core, tmp_path, monkeypatch):
+    import time
+
+    hook = tmp_path / "slow"
+    hook.write_text("#!/bin/sh\nsleep 30 &\nsleep 30\n")
+    hook.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    (tmp_path / "git-slow").symlink_to(hook)
+    start = time.monotonic()
+    assert core._git(tmp_path, "slow", timeout=1) == (124, "timeout")
+    assert time.monotonic() - start < 5
+
+
+def test_ci_needs_one_success_and_the_whole_list(core, github):
+    url = "https://github.com/acme/x"
+    only_skipped, many = "e" * 40, "f" * 40
+    github[only_skipped] = [{"status": "completed", "conclusion": "skipped"}]
+    github[many] = {"total_count": 150, "check_runs": [{"status": "completed", "conclusion": "success"}] * 100}
+    assert core.ci_state(url, only_skipped) == "unknown"
+    assert core.ci_state(url, many) == "unknown"  # more than one page: not enough to call it green
+    assert core.ci_state("https://evilgithub.com/acme/x", "a" * 40) == "unknown"
+    github["status"] = 429
+    assert core.ci_state(url, "a" * 40) == "rate_limited"

@@ -65,7 +65,8 @@ def handle(ctx, method, path, query, body):
                         core.install_skill(ctx["workspace"])
                 return {"updated": "extension", "version": chk["new"]}
             if what == "dokploy":
-                return {"updated": "dokploy", "version": core.dokploy_update(core.client(state, secret), to)["latest"]}
+                chk = core.dokploy_update(core.client(state, secret), to, state)
+                return {"updated": "dokploy", "version": chk["latest"]}
             return 400, {"error": "bad_target", "message": "what must be extension or dokploy"}
         c = core.client(state, secret)
         if path == "services" and method == "GET":
@@ -128,6 +129,7 @@ def handle(ctx, method, path, query, body):
             "update_refused": 409,
             "update_failed": 409,
             "up_to_date": 409,
+            "update_in_progress": 409,
             "not_found": 404,
         }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}
