@@ -261,6 +261,7 @@ def test_a_merge_git_refuses_is_reported_and_changes_nothing(core, repo):
     assert e.value.code == "update_failed" and git(repo["ext"], "rev-parse", "HEAD") == before
 
 
+@pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups are POSIX")
 def test_git_is_killed_with_its_children_on_timeout(core, tmp_path, monkeypatch):
     import time
 
@@ -270,7 +271,7 @@ def test_git_is_killed_with_its_children_on_timeout(core, tmp_path, monkeypatch)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
     (tmp_path / "git-slow").symlink_to(hook)
     start = time.monotonic()
-    assert core._git(tmp_path, "slow", timeout=1) == (124, "timeout")
+    assert core._git(tmp_path, "slow", timeout=1) == (124, "", "timeout")
     assert time.monotonic() - start < 5
 
 
@@ -284,3 +285,80 @@ def test_ci_needs_one_success_and_the_whole_list(core, github):
     assert core.ci_state("https://evilgithub.com/acme/x", "a" * 40) == "unknown"
     github["status"] = 429
     assert core.ci_state(url, "a" * 40) == "rate_limited"
+
+
+def test_the_upstream_remote_need_not_be_origin(core, repo):
+    git(repo["ext"], "remote", "rename", "origin", "upstream")
+    sha = release(repo["src"], "1.1.0")
+    chk = core.ext_check(repo["ext"])
+    assert chk["state"] == "available" and chk["commit"] == sha
+
+
+def test_odd_or_unsafe_setups_fail_closed(core, repo, tmp_path, monkeypatch):
+    release(repo["src"], "1.1.0")
+    assert core.ext_check(repo["ext"], budget=0)["state"] == "timeout"  # no time left: never a false state
+    outer = tmp_path / "outer"
+    (outer / "extensions" / "dokploy").mkdir(parents=True)
+    subprocess.run([*GIT, "init", "-q", str(outer)], check=True)
+    (outer / "extensions" / "dokploy" / "manifest.json").write_text('{"id": "dokploy", "version": "1.0.0"}')
+    assert core.ext_check(outer / "extensions" / "dokploy")["state"] == "not_git"  # a copy inside another repo
+    git(repo["ext"], "config", "branch.main.remote", "-x")
+    assert core.ext_check(repo["ext"], fetch=False)["state"] == "no_upstream"
+    real = core._git
+    monkeypatch.setattr(
+        core,
+        "_git",
+        lambda d, *a, **k: (
+            (128, "", "fatal: detected dubious ownership in repository") if "--show-toplevel" in a else real(d, *a, **k)
+        ),
+    )
+    assert core.ext_check(repo["ext"])["state"] == "dubious_owner"
+
+
+def test_a_stale_or_future_marker_does_not_block_dokploy_updates(core, fake, state):
+    import time
+
+    c = core.Client(fake.url, KEY)
+    marker = state / "dokploy-update-started"
+    for age in (core.DOKPLOY_UPDATE_WAIT + 10, -3600):  # long ago, or dated in the future
+        marker.touch()
+        os.utime(marker, (time.time() - age, time.time() - age))
+        core.dokploy_update(c, "v0.31.0", state)
+        assert marker.exists()  # this update holds it now
+        marker.unlink()
+
+
+def test_a_dokploy_that_cannot_be_reached_before_updating_leaves_no_marker(core, fake, state):
+    fake.close()  # Dokploy is down before anything is sent
+    with pytest.raises(core.DokployError) as e:
+        core.dokploy_update(core.Client(fake.url, KEY, timeout=2), "v0.31.0", state)
+    assert e.value.code == "unreachable" and not (state / "dokploy-update-started").exists()
+
+
+def test_a_merge_that_times_out_says_how_to_recover(core, repo, monkeypatch):
+    sha = release(repo["src"], "1.1.0")
+    assert core.ext_check(repo["ext"])["state"] == "available"
+    real = core._git
+    monkeypatch.setattr(
+        core, "_git", lambda d, *a, **k: (124, "", "timeout") if a[:1] == ("merge",) else real(d, *a, **k)
+    )
+    with pytest.raises(core.DokployError) as e:
+        core.ext_update(repo["ext"], 1, sha)
+    assert e.value.code == "update_failed" and "status" in e.value.message
+
+
+@pytest.mark.parametrize(
+    "url, ok",
+    [
+        ("https://github.com/acme/x.git", True),
+        ("git@github.com:acme/x.git", True),
+        ("https://user@github.com/acme/x", True),
+        ("ssh://git@github.com/acme/x.git", True),
+        ("https://github.com.evil.com/acme/x", False),
+        ("https://evil.com/github.com/acme/x", False),
+        ("https://evilgithub.com/acme/x", False),
+    ],
+)
+def test_only_real_github_remotes_are_looked_up(core, url, ok):
+    m = core.GITHUB_RE.search(url)
+    assert bool(m) is ok and (not ok or (m[1], m[2]) == ("acme", "x"))

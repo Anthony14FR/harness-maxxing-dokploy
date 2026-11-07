@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import sys
+import time
 from pathlib import Path
 
 
@@ -49,12 +50,14 @@ def handle(ctx, method, path, query, body):
         if path == "protect" and method == "POST" and not body.get("on"):  # lifting works offline, and for gone ids
             sid = str(body.get("id") or "")
             return {"id": sid, "protected": sid in core.set_protected(state, sid, False)}
-        if path == "updates" and method == "GET":  # a check only: nothing changes
-            ext = core.ext_check(core.EXT_DIR, _supported_api())
+        if path == "updates" and method == "GET":  # a check only, within Harness's 30 s per request
+            start = time.monotonic()
             try:
-                dok = core.dokploy_check(core.client(state, secret))
+                dok = core.dokploy_check(core.client(state, secret, timeout=4))
             except core.DokployError as e:
                 dok = {"error": e.code, "message": e.message}
+            budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s minus Dokploy's share
+            ext = core.ext_check(core.EXT_DIR, _supported_api(), budget=min(core.CHECK_BUDGET, budget))
             return {"extension": ext, "dokploy": dok, "harness": "/settings/updates"}
         if path == "update" and method == "POST":  # after the user confirmed exactly this version
             what, to = body.get("what"), str(body.get("to") or "")
@@ -65,7 +68,7 @@ def handle(ctx, method, path, query, body):
                         core.install_skill(ctx["workspace"])
                 return {"updated": "extension", "version": chk["new"]}
             if what == "dokploy":
-                chk = core.dokploy_update(core.client(state, secret), to, state)
+                chk = core.dokploy_update(core.client(state, secret, timeout=8), to, state)
                 return {"updated": "dokploy", "version": chk["latest"]}
             return 400, {"error": "bad_target", "message": "what must be extension or dokploy"}
         c = core.client(state, secret)

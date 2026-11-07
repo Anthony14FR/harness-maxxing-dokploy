@@ -68,7 +68,8 @@ The extension updates only to the exact commit you confirmed, from what the chec
 a public GitHub repository whose checks passed (this one): a private or non-GitHub copy is shown with the reason and
 is updated by hand. If git says the folder is owned by another user, run the commands below as that user, or
 `git config --global --add safe.directory /root/maxxing/extensions/dokploy`.
-By hand, the same as the extension's button:
+Harness reloads an extension by itself when its files change, so no restart is needed. By hand, the same as the
+extension's button:
 
 ```bash
 git -C /root/maxxing/extensions/dokploy pull --ff-only && python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill

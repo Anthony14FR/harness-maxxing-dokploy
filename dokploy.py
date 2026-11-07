@@ -2,7 +2,7 @@
 """Deploy through Dokploy from a Claude session; the key is read from Harness Keys for each call, never printed.
 
     dokploy.py status                                         also says when the sessions' skill copy is out of date
-    dokploy.py updates [--json]                               what can be updated (read-only: the user updates it)
+    dokploy.py updates [--json]                               what can be updated (changes nothing: the user updates)
     dokploy.py install-skill                                  copy skill/dokploy to <workspace>/.claude/skills/
     dokploy.py list [--json]                                  projects, apps, compose stacks, databases, domains
     dokploy.py environments [--json]                          where `app create` can put an app
@@ -189,7 +189,8 @@ def run(a: argparse.Namespace) -> int:
             f"dokploy    {d.get('current') or '-'} -> {d.get('latest') or '-'}  "
             f"{d.get('message') or ('available' if d.get('available') else 'up_to_date')}"
         )
-        print("updates are the user's: they run them on the Dokploy page in Harness")
+        print("updates are the user's: they run them on the Dokploy page in Harness (which also checks the")
+        print("extension contract of this Harness)")
         return 0
     if a.action == "status":
         sk = core.skill_state(workspace())
