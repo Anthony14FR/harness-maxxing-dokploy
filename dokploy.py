@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Deploy through Dokploy from a Claude session; the key is read from Harness Keys for each call, never printed.
 
-    dokploy.py status                                         also says when the sessions' skill copy is out of date
+    dokploy.py status                                         also says when the sessions' skill is missing or a copy
     dokploy.py updates [--json]                               what can be updated (changes nothing: the user updates)
-    dokploy.py install-skill                                  copy skill/dokploy to <workspace>/.claude/skills/
+    dokploy.py install-skill (or link-skill)                  link <workspace>/.claude/skills/dokploy to skill/dokploy
     dokploy.py list [--json]                                  projects, apps, compose stacks, databases, domains
     dokploy.py environments [--json]                          where `app create` can put an app
     dokploy.py deploy|redeploy APP --yes [--title T]          APP = id, name or app name
@@ -87,7 +87,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="dokploy.py", description="Deploy through Dokploy (Harness Maxxing extension).")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("status", help="connected or not, and the address")
-    sub.add_parser("install-skill", help="copy the skill to the workspace, where Claude Code reads it")
+    for name in ("install-skill", "link-skill"):  # install-skill kept: 1.x instructions still work
+        sub.add_parser(name, help="link the skill into the workspace, where Claude Code reads it")
     sub.add_parser("updates", help="what can be updated (read-only)").add_argument("--json", action="store_true")
     for name, what in (
         ("list", "projects, apps, stacks, databases and their domains"),
@@ -170,8 +171,8 @@ def _urls(s: dict) -> str:
 
 def run(a: argparse.Namespace) -> int:
     st = state_dir()
-    if a.action == "install-skill":
-        print(f"skill copied to {core.install_skill(workspace())}")
+    if a.action in ("install-skill", "link-skill"):
+        print(f"skill linked at {core.install_skill(workspace())}")
         return 0
     if a.action == "updates":
         res = {"extension": core.ext_check(core.EXT_DIR)}
@@ -194,8 +195,12 @@ def run(a: argparse.Namespace) -> int:
         return 0
     if a.action == "status":
         sk = core.skill_state(workspace())
-        if sk in ("missing", "stale"):
-            print(f"warning: the dokploy skill of sessions is {sk}: dokploy.py install-skill", file=sys.stderr)
+        if sk == "copied":
+            print(
+                "note: sessions use a copy of the dokploy skill (it goes stale): dokploy.py link-skill", file=sys.stderr
+            )
+        elif sk in ("missing", "stale"):
+            print(f"warning: the dokploy skill of sessions is {sk}: dokploy.py link-skill", file=sys.stderr)
         elif sk == "broken":
             print("warning: this extension's skill folder is empty: git pull", file=sys.stderr)
         s = core.status(st, secret)

@@ -35,20 +35,24 @@ behind Dokploy's Traefik with `maxxing proxy`).
    ```
 
    (`/root/maxxing` is the default workspace: use yours if you changed it. The folder must be named `dokploy`.)
-2. **Settings -> Extensions -> Reload**, then open **Dokploy** under Extensions (pin it to keep it in the sidebar).
+2. **Settings -> Pages -> Rescan** (**Settings -> Extensions -> Reload** on older Harness versions), then open
+   **Dokploy** (pin it to keep it in the sidebar).
 3. **Settings -> Keys -> Add a key**: name `DOKPLOY_API_KEY`, your Dokploy API key as the value, and leave
    **Expose to Harness sessions** off (the default): the extension reads the key without it.
 4. On the Dokploy page, check the address (default `http://127.0.0.1:3000`, Dokploy on the same server) and click
    **Check and connect**.
-5. For Claude sessions, click **Install the skill for sessions** on the Dokploy page, or run:
+5. For Claude sessions, link the skill once (Claude Code does not read skills from extension folders; a link, not a
+   copy, so every `git pull` keeps it current):
 
    ```bash
-   python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
+   ln -s /root/maxxing/extensions/dokploy/skill/dokploy /root/maxxing/.claude/skills/dokploy
    ```
 
-   Claude Code does not read skills from extension folders: this copies the files of `skill/dokploy` to
-   `/root/maxxing/.claude/skills/dokploy/`. Other files in that folder are left alone, and a link to another folder
-   is refused rather than followed.
+   The **Link the skill for sessions** button of the Dokploy page, or `dokploy.py link-skill`, does the same.
+
+   **Coming from 1.x?** Nothing breaks: the copy 1.x made keeps working. The page and `dokploy.py status` then offer
+   to replace it with the link; that replaces it only when it holds nothing but this extension's own files, otherwise
+   it says which files to move first. `dokploy.py install-skill` from the 1.x instructions still works (it links).
 
 ## Update
 
@@ -72,7 +76,7 @@ Harness reloads an extension by itself when its files change, so no restart is n
 extension's button:
 
 ```bash
-git -C /root/maxxing/extensions/dokploy pull --ff-only && python3 /root/maxxing/extensions/dokploy/dokploy.py install-skill
+git -C /root/maxxing/extensions/dokploy pull --ff-only
 ```
 
 ## What it sends, and where
@@ -112,7 +116,7 @@ The skill teaches Claude these commands (`skill/dokploy/SKILL.md`):
 ```bash
 D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status
-python3 $D install-skill
+python3 $D link-skill
 python3 $D updates [--json]
 python3 $D list [--json]
 python3 $D environments [--json]
@@ -137,10 +141,11 @@ Dokploy's log folder on this server only, and can contain values a build printed
 ## Remove it
 
 ```bash
-rm -rf /root/maxxing/extensions/dokploy /root/maxxing/.claude/skills/dokploy /var/lib/claude-maxxing/extensions/dokploy
+rm -rf /root/maxxing/extensions/dokploy /var/lib/claude-maxxing/extensions/dokploy
+rm -rf /root/maxxing/.claude/skills/dokploy   # the link (or the copy 1.x made)
 ```
 
-Then **Settings -> Extensions -> Reload**, delete `DOKPLOY_API_KEY` in **Settings -> Keys**, and revoke the key in
+Then **Settings -> Pages -> Rescan** (or **Extensions -> Reload**), delete `DOKPLOY_API_KEY` in **Settings -> Keys**, and revoke the key in
 Dokploy. Your Dokploy, its apps and their domains are left as they are.
 
 ## Development

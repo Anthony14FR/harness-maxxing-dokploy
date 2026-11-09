@@ -225,7 +225,7 @@ def client(state_dir: str | Path, secret: Secret, timeout: float = TIMEOUT) -> C
 
 
 # ---- the skill sessions read ---------------------------------------------------------------------------------
-SKILL_SRC = Path(__file__).resolve().parent / "skill" / "dokploy"
+SKILL_SRC = Path(os.environ.get("DOKPLOY_SKILL_SRC") or Path(__file__).resolve().parent / "skill" / "dokploy").resolve()
 
 
 def skill_dest(workspace: str | Path) -> Path:
@@ -237,45 +237,55 @@ def _files(d: Path) -> dict[str, bytes]:
 
 
 def skill_state(workspace: str | Path | None) -> str:
-    """ok, missing, stale, linked (elsewhere: left alone) or broken (nothing shipped); never raises."""
+    """ok (linked here), missing, copied (an old copy: link it), linked (elsewhere) or broken; never raises."""
     try:
-        src, dest = _files(SKILL_SRC), skill_dest(workspace)
-        if not src:
+        if not _files(SKILL_SRC):
             return "broken"
-        if dest.is_symlink() and dest.resolve() != SKILL_SRC:
-            return "linked"
-        if not (dest / "SKILL.md").is_file():
-            return "missing"
-        have = {n: (dest / n).read_bytes() if (dest / n).is_file() else None for n in src}
-        return "ok" if have == src else "stale"
+        dest = skill_dest(workspace)
+        if dest.is_symlink():
+            return "ok" if dest.resolve() == SKILL_SRC else "linked"
+        if dest.is_dir() and (dest / "SKILL.md").is_file():
+            return "copied"
+        return "missing"
     except (OSError, TypeError, ValueError):
         return "missing"
 
 
 def install_skill(workspace: str | Path) -> Path:
-    """Writes the shipped skill files into <workspace>/.claude/skills/dokploy; other files there are never touched."""
+    """Links <workspace>/.claude/skills/dokploy to this extension's skill (a link follows every git pull).
+
+    An old copy made by 1.x is replaced only when it holds nothing but the files this extension ships.
+    """
     dest = skill_dest(workspace)
+    if not _files(SKILL_SRC):
+        raise DokployError("skill_failed", f"{SKILL_SRC} is empty: update the extension (git pull)")
     if dest.is_symlink():
         if dest.resolve() == SKILL_SRC:
-            return dest  # already linked to this folder (Harness may link extension skills itself)
+            return dest
         raise DokployError("skill_linked", f"{dest} links somewhere else: remove that link first")
     try:
-        src = _files(SKILL_SRC)
-        if not src:
-            raise DokployError("skill_failed", f"{SKILL_SRC} is empty: update the extension (git pull)")
-        dest.mkdir(parents=True, exist_ok=True)
-        for name, data in src.items():
-            fd, tmp = tempfile.mkstemp(dir=dest, prefix=f".{name}-")
-            try:
-                with os.fdopen(fd, "wb") as fh:
-                    fh.write(data)
-                os.chmod(tmp, 0o644)
-                os.replace(tmp, dest / name)  # atomic, and replaces a link instead of writing through it
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+        if dest.exists():
+            ours = _files(SKILL_SRC)
+            extra = (
+                sorted(f.name for f in dest.iterdir() if f.name not in ours or f.is_symlink() or not f.is_file())
+                if dest.is_dir()
+                else []
+            )
+            if not dest.is_dir() or extra:
+                raise DokployError(
+                    "skill_custom",
+                    f"{dest} holds other files ({', '.join(extra) or 'not a folder'}): move them, then retry",
+                )
+            for f in dest.iterdir():
+                f.unlink()
+            dest.rmdir()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f".dokploy-link-{os.getpid()}")
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(SKILL_SRC, target_is_directory=True)
+        os.replace(tmp, dest)  # atomic: Claude never sees the skill half there
     except OSError as e:
-        raise DokployError("skill_failed", f"cannot copy the skill to {dest}: {e.strerror or e}") from None
+        raise DokployError("skill_failed", f"cannot link the skill at {dest}: {e.strerror or e}") from None
     return dest
 
 

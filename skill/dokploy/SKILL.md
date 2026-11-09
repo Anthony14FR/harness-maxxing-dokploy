@@ -12,7 +12,7 @@ by itself.
 ```bash
 D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status                       # connected? (if not: the user opens the Dokploy page in Harness)
-python3 $D install-skill                # refresh this skill when status says it is out of date
+python3 $D link-skill                   # when status says this skill is missing or a copy
 python3 $D updates [--json]            # what can be updated (read-only)
 python3 $D list [--json]                # projects, apps, compose stacks, databases, their state and domains
 python3 $D environments [--json]        # environment ids, for app create
@@ -43,7 +43,8 @@ python3 $D app create --environment ID --name N --repo URL [--branch B] [--build
   running / expected containers. It always exits 0: read the first word.
 - **Updates are the user's.** `updates` only reads: never update the extension, Dokploy or Harness yourself; tell
   the user to use **Updates** on the Dokploy page (Harness: Settings -> Updates).
-- If `status` warns that this skill is missing or out of date, run `install-skill`, then read this file again.
+- If `status` says this skill is missing or a copy, tell the user: the **Link the skill for sessions** button of
+  the Dokploy page (or `link-skill`, if they agree) links it once, so it follows every update.
 - APP is the id, the name or the app name from `list`; a name used in two projects needs the id.
 - A compose stack's domain needs `--service` (a service of its compose file). Repository URLs: `https://`, `ssh://` or
   `git@host:path`. A domain also needs its DNS pointing to the server, then a redeploy.

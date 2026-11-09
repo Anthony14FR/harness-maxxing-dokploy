@@ -293,6 +293,16 @@ elif a[:2] == ["keys", "list"]:
 
 
 @pytest.fixture(autouse=True)
+def _skill_copy(monkeypatch, tmp_path):
+    """Tests link and write through the skill folder: give them a copy, never the repository's own files."""
+    import shutil
+
+    src = tmp_path / "shipped-skill" / "dokploy"
+    shutil.copytree(ROOT / "skill" / "dokploy", src)
+    monkeypatch.setenv("DOKPLOY_SKILL_SRC", str(src))
+
+
+@pytest.fixture(autouse=True)
 def _no_real_state(monkeypatch, tmp_path):
     monkeypatch.setenv("MAXXING_STATE", str(tmp_path / "state"))
     monkeypatch.delenv("DOKPLOY_API_KEY", raising=False)

@@ -122,9 +122,14 @@ def test_status_flags_an_old_skill_and_install_skill_fixes_it(connected, tmp_pat
     ws = tmp_path / "my-ws"
     (tmp_path / "state" / "config.json").write_text(json.dumps({"workspace": str(ws)}))
     assert "skill of sessions is missing" in run(connected, capsys, "status")[2]
-    code, out, _ = run(connected, capsys, "install-skill")
-    assert code == 0 and str(ws / ".claude" / "skills" / "dokploy") in out
+    dest = ws / ".claude" / "skills" / "dokploy"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("1.1.0 copy")
+    assert "sessions use a copy" in run(connected, capsys, "status")[2]
+    code, out, _ = run(connected, capsys, "install-skill")  # the 1.x command still works: it links now
+    assert code == 0 and out.startswith("skill linked at") and dest.is_symlink()
     assert "skill" not in run(connected, capsys, "status")[2]
+    assert run(connected, capsys, "link-skill")[0] == 0
 
 
 def test_a_bad_workspace_setting_falls_back(cli, tmp_path):

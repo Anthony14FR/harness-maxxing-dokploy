@@ -408,52 +408,60 @@ def test_no_earlier_deployment_to_roll_back_to(core, fake, monkeypatch):
     assert e.value.code == "no_rollback"
 
 
-def test_the_skill_copy_for_sessions(core, tmp_path):
+def test_the_skill_is_linked_for_sessions(core, tmp_path):
     ws = tmp_path / "ws"
     assert core.skill_state(ws) == "missing"
     dest = core.install_skill(ws)
-    assert dest == ws / ".claude" / "skills" / "dokploy" and core.skill_state(ws) == "ok"
-    (dest / "SKILL.md").write_text("old")
-    assert core.skill_state(ws) == "stale"
-    core.install_skill(ws)
-    assert core.skill_state(ws) == "ok"
+    assert dest.is_symlink() and dest.resolve() == core.SKILL_SRC and core.skill_state(ws) == "ok"
+    assert core.install_skill(ws) == dest  # idempotent
 
 
-def test_a_linked_skill_is_left_alone(core, tmp_path):
+def test_a_copy_from_1x_keeps_working_until_it_is_linked(core, tmp_path):
     ws = tmp_path / "ws"
-    (ws / ".claude" / "skills").mkdir(parents=True)
-    (ws / ".claude" / "skills" / "dokploy").symlink_to(core.SKILL_SRC)
+    old = core.skill_dest(ws)
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("the 1.1.0 skill")  # an older, stale copy: still a skill Claude can read
+    assert core.skill_state(ws) == "copied"
     core.install_skill(ws)
-    assert (ws / ".claude" / "skills" / "dokploy").is_symlink() and core.skill_state(ws) == "ok"
+    assert old.is_symlink() and core.skill_state(ws) == "ok"
 
 
-def test_install_skill_refuses_foreign_links_and_keeps_other_files(core, tmp_path):
+@pytest.mark.parametrize("setup", ["notes", "subdir", "filelink", "file"])
+def test_a_copy_holding_the_users_files_is_never_touched(core, tmp_path, setup):
+    ws, outside = tmp_path / "ws", tmp_path / "outside.md"
+    outside.write_text("keep me")
+    dest = core.skill_dest(ws)
+    dest.parent.mkdir(parents=True)
+    if setup == "file":
+        dest.write_text("not a folder")
+    else:
+        dest.mkdir()
+        (dest / "SKILL.md").write_text("copy")
+        if setup == "notes":
+            (dest / "my-notes.md").write_text("the user's")
+        if setup == "subdir":
+            (dest / "SKILL.md").unlink()
+            (dest / "SKILL.md").mkdir()
+        if setup == "filelink":
+            (dest / "SKILL.md").unlink()
+            (dest / "SKILL.md").symlink_to(outside)
+    before = sorted(str(p) for p in dest.parent.rglob("*"))
+    with pytest.raises(core.DokployError) as e:
+        core.install_skill(ws)
+    assert e.value.code == "skill_custom" and sorted(str(p) for p in dest.parent.rglob("*")) == before
+    assert outside.read_text() == "keep me"
+
+
+def test_a_link_elsewhere_is_refused(core, tmp_path):
     ws, other = tmp_path / "ws", tmp_path / "users-own-skill"
     other.mkdir()
     (other / "SKILL.md").write_text("mine")
-    (ws / ".claude" / "skills").mkdir(parents=True)
-    (ws / ".claude" / "skills" / "dokploy").symlink_to(other)
+    core.skill_dest(ws).parent.mkdir(parents=True)
+    core.skill_dest(ws).symlink_to(other)
     assert core.skill_state(ws) == "linked"
     with pytest.raises(core.DokployError) as e:
         core.install_skill(ws)
     assert e.value.code == "skill_linked" and (other / "SKILL.md").read_text() == "mine"
-    (ws / ".claude" / "skills" / "dokploy").unlink()
-    dest = core.install_skill(ws)
-    (dest / "my-notes.md").write_text("the user's")
-    assert core.skill_state(ws) == "ok"  # extra files are not ours to judge
-    core.install_skill(ws)
-    assert (dest / "my-notes.md").read_text() == "the user's"
-
-
-def test_install_skill_replaces_a_file_link_without_writing_through_it(core, tmp_path):
-    ws, outside = tmp_path / "ws", tmp_path / "outside.md"
-    outside.write_text("keep me")
-    dest = core.skill_dest(ws)
-    dest.mkdir(parents=True)
-    (dest / "SKILL.md").symlink_to(outside)
-    core.install_skill(ws)
-    assert outside.read_text() == "keep me" and not (dest / "SKILL.md").is_symlink()
-    assert core.skill_state(ws) == "ok"
 
 
 def test_skill_errors_never_break_status(core, tmp_path, monkeypatch):
@@ -465,11 +473,14 @@ def test_skill_errors_never_break_status(core, tmp_path, monkeypatch):
         core.install_skill(ws)
     assert e.value.code == "skill_failed"
     assert core.skill_state(None) == "missing"
-    (ws / ".claude" / "skills").unlink()
-    core.skill_dest(ws).mkdir(parents=True)
-    (core.skill_dest(ws) / "SKILL.md").mkdir()  # a folder where the file goes
+    monkeypatch.setattr(core, "SKILL_SRC", tmp_path / "nothing")
+    assert core.skill_state(ws) == "broken"
     with pytest.raises(core.DokployError) as e:
         core.install_skill(ws)
     assert e.value.code == "skill_failed"
-    monkeypatch.setattr(core, "SKILL_SRC", tmp_path / "nothing")
-    assert core.skill_state(ws) == "broken"
+
+
+def test_tests_never_use_the_repository_skill_folder(core):
+    from conftest import ROOT
+
+    assert (ROOT / "skill" / "dokploy").resolve() != core.SKILL_SRC and (core.SKILL_SRC / "SKILL.md").is_file()
