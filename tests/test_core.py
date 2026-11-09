@@ -499,7 +499,8 @@ def test_a_failed_link_puts_the_1x_copy_back(core, tmp_path, monkeypatch):
     with pytest.raises(core.DokployError) as e:
         core.install_skill(ws)
     assert e.value.code == "skill_failed" and (old / "SKILL.md").read_text() == "the 1.1.0 skill"
-    assert sorted(p.name for p in old.parent.iterdir()) == ["dokploy"]  # nothing left aside, no temp link
+    assert sorted(p.name for p in old.parent.iterdir()) == ["dokploy"]  # no temp link among the skills
+    assert not list((ws / ".claude").glob(".dokploy-old-*"))  # the copy is back, nothing left aside
 
 
 def test_an_update_never_replaces_a_1x_copy(core, tmp_path):
@@ -526,3 +527,59 @@ def test_a_dead_link_is_repaired_and_states_are_named(core, tmp_path):
     (dest / "SKILL.md").write_text("copy")
     (dest / "notes.md").write_text("mine")
     assert core.skill_state(ws) == "custom"
+
+
+def test_leftovers_of_an_interrupted_run_are_swept_and_never_among_skills(core, tmp_path):
+    ws = tmp_path / "ws"
+    skills = core.skill_dest(ws).parent
+    skills.mkdir(parents=True)
+    (ws / ".claude" / ".dokploy-old-dead").mkdir()
+    (ws / ".claude" / ".dokploy-old-dead" / "SKILL.md").write_text("old")
+    (skills / ".dokploy-link-dead").symlink_to(tmp_path)
+    old = core.skill_dest(ws)
+    old.mkdir()
+    (old / "SKILL.md").write_text("copy")
+    core.install_skill(ws)
+    assert sorted(p.name for p in skills.iterdir()) == ["dokploy"]
+    assert not list((ws / ".claude").glob(".dokploy-*"))
+
+
+def test_an_empty_folder_is_a_missing_skill(core, tmp_path):
+    ws = tmp_path / "ws"
+    core.skill_dest(ws).mkdir(parents=True)
+    assert core.skill_state(ws) == "missing"
+    core.install_skill(ws)
+    assert core.skill_state(ws) == "ok"
+
+
+def test_concurrent_links_end_linked_with_nothing_stranded(core, tmp_path):
+    import threading
+
+    ws = tmp_path / "ws"
+    old = core.skill_dest(ws)
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("copy")
+    errors = []
+
+    def go():
+        try:
+            core.install_skill(ws)
+        except core.DokployError as e:
+            errors.append(e.code)
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors and core.skill_state(ws) == "ok" and not list((ws / ".claude").glob(".dokploy-*"))
+
+
+def test_a_copy_left_aside_with_no_skill_in_place_is_given_back(core, tmp_path):
+    ws = tmp_path / "ws"
+    core.skill_dest(ws).parent.mkdir(parents=True)
+    aside = ws / ".claude" / ".dokploy-old-crashed"
+    aside.mkdir()
+    (aside / "SKILL.md").write_text("the only copy")
+    core.install_skill(ws, replace_copy=False)  # an update after a crash: the copy comes back, not deleted
+    assert (core.skill_dest(ws) / "SKILL.md").read_text() == "the only copy" and not aside.exists()

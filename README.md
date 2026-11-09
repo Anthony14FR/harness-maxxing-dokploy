@@ -55,7 +55,8 @@ behind Dokploy's Traefik with `maxxing proxy`).
    **Coming from 1.x?** Nothing breaks: the copy 1.x made keeps working, and updating the extension never replaces it.
    Use the page's button or `dokploy.py link-skill` (not `ln -s`, which would put the link inside the existing
    folder): the copy is moved aside, the link made, and the copy put back if anything fails. A folder holding your
-   own files is left as it is. `dokploy.py install-skill` from the 1.x instructions still works (it links).
+   own files is left as it is; a copy whose `SKILL.md` you edited by hand is replaced like any copy, keep your edits
+elsewhere first. `dokploy.py install-skill` from the 1.x instructions still works (it links).
 
 ## Update
 

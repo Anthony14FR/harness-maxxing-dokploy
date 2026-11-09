@@ -10,12 +10,15 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -256,12 +259,22 @@ def skill_state(workspace: str | Path | None) -> str:
             return "linked" if dest.exists() else "missing"  # a dead link is repaired like a missing skill
         if dest.is_dir() and (dest / "SKILL.md").is_file():
             return "custom" if _custom(dest) else "copied"
-        return "missing" if not dest.exists() else "custom"
+        if not dest.exists() or (dest.is_dir() and not any(dest.iterdir())):
+            return "missing"  # nothing, or an empty folder: install_skill replaces it
+        return "custom"
     except (OSError, TypeError, ValueError):
         return "missing"
 
 
+_SKILL_LOCK = threading.Lock()  # one link at a time: the update route and the button can run together
+
+
 def install_skill(workspace: str | Path, replace_copy: bool = True) -> Path:
+    with _SKILL_LOCK:
+        return _install_skill(workspace, replace_copy)
+
+
+def _install_skill(workspace: str | Path, replace_copy: bool) -> Path:
     """Links <workspace>/.claude/skills/dokploy to this extension's skill (a link follows every git pull).
 
     A 1.x copy is replaced only when `replace_copy` and it holds nothing but the shipped files; it is moved aside
@@ -274,8 +287,18 @@ def install_skill(workspace: str | Path, replace_copy: bool = True) -> Path:
         return dest
     if dest.is_symlink() and dest.exists():
         raise DokployError("skill_linked", f"{dest} links to another folder: remove that link first")
-    aside = dest.with_name(f".dokploy-old-{os.getpid()}")
-    tmp = dest.with_name(f".dokploy-link-{os.getpid()}")
+    claude = dest.parent.parent  # <workspace>/.claude: the aside copy never sits among the skills Claude reads
+    for old in dest.parent.glob(".dokploy-link-*"):
+        with contextlib.suppress(OSError):  # a temp link an interrupted run left
+            old.unlink()
+    for old in claude.glob(".dokploy-old-*"):  # a copy an interrupted run moved aside
+        with contextlib.suppress(OSError):
+            if not dest.exists() and not dest.is_symlink():
+                os.rename(old, dest)  # it may be the only copy left: give it back first
+            else:
+                shutil.rmtree(old)
+    tag = uuid.uuid4().hex[:12]
+    aside, tmp = claude / f".dokploy-old-{tag}", dest.with_name(f".dokploy-link-{tag}")
     moved = False
     try:
         if dest.exists() and not dest.is_symlink():
@@ -298,10 +321,7 @@ def install_skill(workspace: str | Path, replace_copy: bool = True) -> Path:
                 os.rename(aside, dest)  # put the copy back: never leave the sessions without a skill
         raise DokployError("skill_failed", f"cannot link the skill at {dest}: {e.strerror or e}") from None
     if moved:
-        with contextlib.suppress(OSError):
-            for f in aside.iterdir():
-                f.unlink()
-            aside.rmdir()
+        shutil.rmtree(aside, ignore_errors=True)
     return dest
 
 
