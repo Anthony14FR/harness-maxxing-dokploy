@@ -64,8 +64,10 @@ def handle(ctx, method, path, query, body):
             if what == "extension":
                 chk = core.ext_update(core.EXT_DIR, _supported_api(), to)
                 if ctx.get("workspace"):
-                    with contextlib.suppress(core.DokployError):  # the page still offers the skill button
-                        core.install_skill(ctx["workspace"])
+                    with contextlib.suppress(
+                        core.DokployError
+                    ):  # links only a missing skill: a copy waits for the user
+                        core.install_skill(ctx["workspace"], replace_copy=False)
                 return {"updated": "extension", "version": chk["new"]}
             if what == "dokploy":
                 chk = core.dokploy_update(core.client(state, secret, timeout=8), to, state)

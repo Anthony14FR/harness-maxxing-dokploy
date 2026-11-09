@@ -199,8 +199,10 @@ def run(a: argparse.Namespace) -> int:
             print(
                 "note: sessions use a copy of the dokploy skill (it goes stale): dokploy.py link-skill", file=sys.stderr
             )
-        elif sk in ("missing", "stale"):
-            print(f"warning: the dokploy skill of sessions is {sk}: dokploy.py link-skill", file=sys.stderr)
+        elif sk == "missing":
+            print("warning: the dokploy skill of sessions is missing: dokploy.py link-skill", file=sys.stderr)
+        elif sk in ("custom", "linked"):
+            print(f"note: the dokploy skill of sessions is the user's own ({sk}): left as it is", file=sys.stderr)
         elif sk == "broken":
             print("warning: this extension's skill folder is empty: git pull", file=sys.stderr)
         s = core.status(st, secret)

@@ -7,8 +7,9 @@ const T = {
     skill: {
       missing: "Claude sessions do not have the dokploy skill yet.",
       copied: "Claude sessions use a copy of the dokploy skill, which goes stale: link it instead, so it follows every update (the copy keeps working until then).",
-      stale: "The dokploy skill of Claude sessions is older than this extension.",
       broken: "This extension's skill folder is empty: update the extension (git pull).",
+      custom: "Claude sessions use your own dokploy skill folder (it holds your files): it is left as it is.",
+      linked: "The dokploy skill of Claude sessions links to another folder: it is left as it is.",
     },
     skillButton: "Link the skill for sessions", skillDone: "Skill linked: Claude sessions now follow every update.",
     keyChanged: "DOKPLOY_API_KEY changed in Settings -> Keys: check it again before it is used.",
@@ -72,8 +73,9 @@ const T = {
     skill: {
       missing: "Les sessions Claude n’ont pas encore le skill dokploy.",
       copied: "Les sessions Claude utilisent une copie du skill dokploy, qui se périme : liez-le plutôt, pour qu’il suive chaque mise à jour (la copie fonctionne d’ici là).",
-      stale: "Le skill dokploy des sessions Claude est plus ancien que cette extension.",
       broken: "Le dossier du skill de cette extension est vide : mettez l’extension à jour (git pull).",
+      custom: "Les sessions Claude utilisent votre propre dossier de skill dokploy (il contient vos fichiers) : il est laissé tel quel.",
+      linked: "Le skill dokploy des sessions Claude pointe vers un autre dossier : il est laissé tel quel.",
     },
     skillButton: "Lier le skill pour les sessions", skillDone: "Skill lié : les sessions Claude suivent désormais chaque mise à jour.",
     keyChanged: "DOKPLOY_API_KEY a changé dans Réglages -> Clés : vérifiez-la à nouveau avant qu’elle serve.",
@@ -312,7 +314,7 @@ export function mount(el, ctx) {
         say(t.skillDone, "ui-success");
       } catch (e) { fail(e); btn.disabled = false; }
     } }, t.skillButton);
-    skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), state === "broken" ? null : btn);
+    skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), ["missing", "copied"].includes(state) ? btn : null);
   }
 
   // Updates: a check changes nothing; each update runs only the exact version the user confirmed.

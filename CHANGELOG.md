@@ -4,9 +4,10 @@
 
 - **The skill is linked, not copied**: `ln -s` (the new Harness community rule), the page's **Link the skill for
   sessions** button or `dokploy.py link-skill`; a link follows every `git pull`. Nothing breaks from 1.x: the old copy
-  keeps working, the page and `status` offer to replace it (only when it holds nothing but this extension's files),
-  and `install-skill` still works (it links). README: **Settings -> Pages -> Rescan** (Extensions -> Reload on older
-  Harness).
+  keeps working and an extension update never replaces it; the button or `link-skill` moves it aside, makes the link
+  and puts the copy back if anything fails; a folder holding the user's own files, or a link to another folder, is
+  left as it is; a dead link is repaired; `install-skill` still works (it links). README: **Settings -> Pages ->
+  Rescan** (Extensions -> Reload on older Harness).
 
 ## 1.2.0 - 2026-11-07
 

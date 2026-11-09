@@ -211,10 +211,14 @@ def test_the_page_checks_and_updates(core, repo, fake, state, monkeypatch, tmp_p
     sha = release(repo["src"], "1.1.0")
     r = api.handle(ctx, "GET", "updates", {}, None)
     assert r["extension"]["commit"] == sha and r["dokploy"]["latest"] == "v0.31.0"
+    copy = tmp_path / "ws" / ".claude" / "skills" / "dokploy"
+    copy.mkdir(parents=True)
+    (copy / "SKILL.md").write_text("a 1.x copy")
     assert api.handle(ctx, "POST", "update", {}, {"what": "extension", "to": sha}) == {
         "updated": "extension",
         "version": "1.1.0",
     }
+    assert (copy / "SKILL.md").read_text() == "a 1.x copy" and not copy.is_symlink()  # updates never replace it
     assert api.handle(ctx, "POST", "update", {}, {"what": "dokploy", "to": "v0.31.0"})["version"] == "v0.31.0"
     assert api.handle(ctx, "POST", "update", {}, {"what": "harness"})[0] == 400
 

@@ -45,14 +45,17 @@ behind Dokploy's Traefik with `maxxing proxy`).
    copy, so every `git pull` keeps it current):
 
    ```bash
+   mkdir -p /root/maxxing/.claude/skills
    ln -s /root/maxxing/extensions/dokploy/skill/dokploy /root/maxxing/.claude/skills/dokploy
    ```
 
-   The **Link the skill for sessions** button of the Dokploy page, or `dokploy.py link-skill`, does the same.
+   The **Link the skill for sessions** button of the Dokploy page, or `dokploy.py link-skill`, does the same. The
+   linked `SKILL.md` is this extension's own file: do not edit it (a local change blocks the extension's updates).
 
-   **Coming from 1.x?** Nothing breaks: the copy 1.x made keeps working. The page and `dokploy.py status` then offer
-   to replace it with the link; that replaces it only when it holds nothing but this extension's own files, otherwise
-   it says which files to move first. `dokploy.py install-skill` from the 1.x instructions still works (it links).
+   **Coming from 1.x?** Nothing breaks: the copy 1.x made keeps working, and updating the extension never replaces it.
+   Use the page's button or `dokploy.py link-skill` (not `ln -s`, which would put the link inside the existing
+   folder): the copy is moved aside, the link made, and the copy put back if anything fails. A folder holding your
+   own files is left as it is. `dokploy.py install-skill` from the 1.x instructions still works (it links).
 
 ## Update
 

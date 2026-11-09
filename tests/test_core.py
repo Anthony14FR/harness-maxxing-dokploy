@@ -484,3 +484,45 @@ def test_tests_never_use_the_repository_skill_folder(core):
     from conftest import ROOT
 
     assert (ROOT / "skill" / "dokploy").resolve() != core.SKILL_SRC and (core.SKILL_SRC / "SKILL.md").is_file()
+
+
+def test_a_failed_link_puts_the_1x_copy_back(core, tmp_path, monkeypatch):
+    ws = tmp_path / "ws"
+    old = core.skill_dest(ws)
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("the 1.1.0 skill")
+
+    def refuse(*a, **k):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(core.Path, "symlink_to", refuse)
+    with pytest.raises(core.DokployError) as e:
+        core.install_skill(ws)
+    assert e.value.code == "skill_failed" and (old / "SKILL.md").read_text() == "the 1.1.0 skill"
+    assert sorted(p.name for p in old.parent.iterdir()) == ["dokploy"]  # nothing left aside, no temp link
+
+
+def test_an_update_never_replaces_a_1x_copy(core, tmp_path):
+    ws = tmp_path / "ws"
+    old = core.skill_dest(ws)
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("the 1.1.0 skill")
+    assert core.install_skill(ws, replace_copy=False) == old and not old.is_symlink()
+    assert core.skill_state(ws) == "copied"
+    fresh = tmp_path / "fresh"
+    assert core.install_skill(fresh, replace_copy=False).is_symlink()  # a missing skill is linked
+
+
+def test_a_dead_link_is_repaired_and_states_are_named(core, tmp_path):
+    ws = tmp_path / "ws"
+    dest = core.skill_dest(ws)
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(tmp_path / "moved-away")
+    assert core.skill_state(ws) == "missing"
+    core.install_skill(ws)
+    assert core.skill_state(ws) == "ok"
+    dest.unlink()
+    dest.mkdir()
+    (dest / "SKILL.md").write_text("copy")
+    (dest / "notes.md").write_text("mine")
+    assert core.skill_state(ws) == "custom"
