@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1 - 2026-11-09
+
+- **Domains of a compose that routes itself**: a compose whose own Traefik labels route its hosts (instead of
+  domains declared in Dokploy) showed `-` in the Domains column although its site was up. The page now adds those
+  hosts once the containers are read (hover: "Routed by this compose's own Traefik labels"), and `dokploy.py health`
+  lists them as `routed`. Only the routing labels of the compose's running containers are read; nothing is changed in
+  Dokploy. The skill tells sessions never to `domain add` them (a second router for the same host).
+
 ## 1.3.0 - 2026-11-09
 
 - **The skill is linked, not copied**: `ln -s` (the new Harness community rule), the page's **Link the skill for

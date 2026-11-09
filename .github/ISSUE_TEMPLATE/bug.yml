@@ -1,0 +1,53 @@
+name: Bug report
+description: Something on the Dokploy page or in dokploy.py does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problem? Do not open an issue: use [private reporting](https://github.com/Anthony14FR/harness-maxxing-dokploy/security/advisories/new).
+        Never paste your API key, a deployment log with secrets or real customer data.
+  - type: input
+    id: version
+    attributes:
+      label: Extension version
+      description: "`version` in manifest.json, or the Updates panel."
+      placeholder: 1.3.1
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness Maxxing version
+      placeholder: 2.0.0a135
+    validations:
+      required: true
+  - type: input
+    id: dokploy
+    attributes:
+      label: Dokploy version
+      placeholder: v0.31.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. Screenshots welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Dokploy page
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: "`python3 dokploy.py status` and the failing command with `--json`, keys and hosts redacted."
+      render: shell

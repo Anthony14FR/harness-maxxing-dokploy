@@ -85,6 +85,28 @@ CONTAINERS = {
     ],
 }
 
+# docker inspect of a compose container routing its own hosts (no Dokploy domain); Env must never leave core
+INSPECT = {
+    "2": {
+        "Id": "2",
+        "Config": {
+            "Env": ["SECRET_TOKEN=do-not-leak"],
+            "Labels": {
+                "com.docker.compose.service": "web",
+                "traefik.enable": "true",
+                "traefik.http.routers.shop.rule": "Host(`shop.example.com`) || Host(`WWW.shop.example.com`)",
+                "traefik.http.routers.shop.entrypoints": "websecure",
+                "traefik.http.routers.shop.tls.certresolver": "letsencrypt",
+                "traefik.http.routers.shop-http.rule": "Host(`shop.example.com`)",
+                "traefik.http.routers.shop-http.entrypoints": "web",
+                "traefik.http.routers.api.rule": "Host(`api.shop.example.com`) && PathPrefix(`/v1`)",
+                "traefik.http.routers.api.tls": "true",
+                "traefik.http.routers.any.rule": "HostRegexp(`{sub:[a-z]+}.example.com`)",
+            },
+        },
+    },
+}
+
 
 def _all(plural):
     for p in PROJECTS:
@@ -161,6 +183,10 @@ class FakeDokploy:
             return next(((200, x) for x in _all(plural) if x[key] == data.get(key)), (404, {"message": "not found"}))
         if proc == "docker.getContainersByAppNameMatch":
             return 200, CONTAINERS.get(data.get("appName"), [])
+        if proc == "docker.getConfig":
+            if data.get("containerId") not in INSPECT:
+                return 404, {"message": "No such container"}
+            return 200, INSPECT[data["containerId"]]
         if proc == "docker.getStackContainersByAppName":
             return 200, [
                 {"name": f"{data['appName']}_web.1", "state": "running", "currentState": "Running 2 hours ago"},

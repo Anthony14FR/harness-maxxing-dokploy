@@ -1,0 +1,29 @@
+name: Feature request
+description: Propose a change; wait for a maintainer's go before opening a pull request.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you cannot do today, in a real use case.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What the page or the CLI would do. Which Dokploy API procedures it needs, if you know.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety
+      description: Does it write to Dokploy? How is the user asked first, and what if the service is protected?
+  - type: checkboxes
+    id: dev
+    attributes:
+      label: Contribution
+      options:
+        - label: I would like to open the pull request myself once agreed.

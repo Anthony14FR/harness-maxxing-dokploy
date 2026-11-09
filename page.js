@@ -65,6 +65,7 @@ const T = {
     doneAction: { stop: (n) => `${n} is stopping.`, start: (n) => `${n} is starting.`, rollback: (n) => `Rollback of ${n} started.` },
     protect: "Protect", unprotect: "Unprotect", protectedBadge: "protected",
     protectedHelp: "Protected: read-only here and for sessions. Only you can lift it, on this page.",
+    routedHelp: "Routed by this compose's own Traefik labels, not a Dokploy domain",
   },
   fr: {
     title: "Dokploy",
@@ -131,6 +132,7 @@ const T = {
     doneAction: { stop: (n) => `${n} s’arrête.`, start: (n) => `${n} démarre.`, rollback: (n) => `Retour arrière de ${n} lancé.` },
     protect: "Protéger", unprotect: "Ne plus protéger", protectedBadge: "protégé",
     protectedHelp: "Protégé : en lecture seule ici et pour les sessions. Vous seul pouvez lever la protection, sur cette page.",
+    routedHelp: "Routé par les labels Traefik de ce compose, pas par un domaine Dokploy",
   },
 };
 
@@ -261,10 +263,13 @@ export function mount(el, ctx) {
     };
     const rows = services.map((s) => {
       const deployable = s.kind === "application" || s.kind === "compose";
-      const links = s.domains.map((d) => {
+      const link = (d, title) => {
         const href = `${d.https ? "https" : "http"}://${d.host}${d.path !== "/" ? d.path : ""}`;
-        return h("a", { class: "ui-link", href, target: "_blank", rel: "noopener noreferrer" }, d.host);
-      });
+        return h("a", { class: "ui-link", href, target: "_blank", rel: "noopener noreferrer", ...(title ? { title } : {}) }, d.host);
+      };
+      const spaced = (as) => (as.length ? as.flatMap((a, i) => (i ? [" ", a] : [a])) : "-");
+      const links = s.domains.map((d) => link(d));
+      const domains = h("td", {}, spaced(links));
       const writes = deployable && !s.protected ? [
         h("button", { class: "ui-btn ui-sm", onclick: () => deploy(s, false) }, t.deploy), " ",
         h("button", { class: "ui-btn ui-secondary ui-sm", onclick: () => deploy(s, true) }, t.redeploy), " ",
@@ -277,6 +282,8 @@ export function mount(el, ctx) {
       if (deployable) {
         queue(() => ctx.api(`health?id=${encodeURIComponent(s.id)}`).then((r) => {
           if (!alive) return;
+          const routed = (r.routed || []).map((d) => link(d, t.routedHelp));  // a compose carrying its own Traefik routes
+          if (routed.length) domains.replaceChildren(...[spaced([...links, ...routed])].flat());
           const count = r.state === "unknown" || r.expected === 0 ? "" : ` ${r.running}/${r.expected ?? r.containers.length}`;
           boxes.replaceChildren(h("span", {
             class: `ui-badge ${HEALTH[r.state] || "ui-outline"}`,
@@ -290,7 +297,7 @@ export function mount(el, ctx) {
         h("td", {}, s.kind),
         h("td", {}, s.project + (s.environment ? ` / ${s.environment}` : "")),
         h("td", {}, h("b", {}, s.name), s.protected ? [" ", h("span", { class: "ui-badge ui-primary", title: t.protectedHelp }, t.protectedBadge)] : null),
-        h("td", {}, links.length ? links.flatMap((a, i) => (i ? [" ", a] : [a])) : "-"),
+        domains,
         h("td", { style: "white-space:nowrap" }, deployable ? [
           ...writes,
           h("button", { class: "ui-btn ui-ghost ui-sm", onclick: () => slot.replaceChildren(logPanel(s, close)) }, t.logs), " ",
