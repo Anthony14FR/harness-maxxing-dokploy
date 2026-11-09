@@ -1,168 +1,162 @@
 # Dokploy for Harness Maxxing
 
-A community [page extension](https://github.com/makushingu/harness-maxxing/blob/main/docs/user/13-page-extensions.md)
-for [Harness Maxxing](https://github.com/makushingu/harness-maxxing) that connects it to
-[Dokploy](https://dokploy.com):
+[![CI](https://github.com/Anthony14FR/harness-maxxing-dokploy/actions/workflows/ci.yml/badge.svg)](https://github.com/Anthony14FR/harness-maxxing-dokploy/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Harness Maxxing](https://img.shields.io/badge/Harness%20Maxxing-page%20extension-6d28d9)](https://github.com/makushingu/harness-maxxing)
+[![Dokploy](https://img.shields.io/badge/Dokploy-v0.30%20%7C%20v0.31-0ea5e9)](https://dokploy.com)
+[![Python](https://img.shields.io/badge/python-3.11%2B%20%C2%B7%20stdlib%20only-3776ab)](pyproject.toml)
 
-- **A Dokploy page** in Harness: your projects, applications, compose stacks, databases and domains with their last
-  deployment, the containers really running and the last deployment log, and **Deploy**, **Rebuild**, **Roll back**,
-  **Stop** and **Start** buttons that ask you first (type the service name when the site can be down for a few
-  seconds).
-- **Protected services**: mark a production service read-only on the page; the page and `dokploy.py` then refuse to
-  deploy, rebuild it or add a domain to it, and only the page can lift it.
-- **A skill for Claude sessions**: Claude lists what runs, reads why a deployment failed, deploys, adds a domain or
-  creates an app from a git repository, and asks you before every change.
+**Your [Dokploy](https://dokploy.com) inside [Harness Maxxing](https://github.com/makushingu/harness-maxxing).** See every
+app, stack, database and domain, deploy, roll back and read logs from one page, and let your Claude sessions do the
+same, always asking you first.
 
-It changes nothing in Harness itself and works however Harness is reached (its own Caddy, Tailscale, local, or
-behind Dokploy's Traefik with `maxxing proxy`).
+A community [page extension](https://github.com/makushingu/harness-maxxing/blob/main/docs/user/13-page-extensions.md):
+one `git clone`, nothing changed in Harness or Dokploy.
 
-> **Community extension, not reviewed by the Harness Maxxing maintainers.** Like every extension, `api.py` runs
-> inside the Harness server with its rights (root on a standard install). Read the code before installing it.
+```mermaid
+flowchart LR
+  you([You]) --> page["Dokploy page<br/>in Harness"]
+  claude([Claude sessions]) --> skill["dokploy skill<br/>dokploy.py"]
+  page --> api["api.py<br/>(key from Settings → Keys)"]
+  skill --> api2["dokploy_core.py"]
+  api --> core[(Dokploy API)]
+  api2 --> core
+  core --> apps["apps · compose · databases<br/>Traefik domains"]
+```
 
-## Requirements
+## Features
 
-- Harness Maxxing with page extensions (extension contract `"api": 1`).
-- A Dokploy you can reach from the Harness server (tested with Dokploy v0.30.10) and an API key. In Dokploy v0.30:
-  **Settings -> Profile** (`/dashboard/settings/profile`), block **API/CLI Keys**, **Generate New Key**. The key is
-  shown only once: copy it right away.
+- **One page for everything** - projects, applications, compose stacks, databases and domains, with the last
+  deployment, the containers really running (`running 2/2`, `partly down`, `down`), and the domains Dokploy declares
+  or that a compose routes with its own Traefik labels.
+- **Actions that ask first** - Deploy, Rebuild, Roll back, Stop, Start. When the site can be down for a few seconds,
+  you type the service name to confirm.
+- **Protected services** - mark production read-only: the page and the sessions refuse every write until you lift it.
+- **Claude knows Dokploy** - a skill to list what runs, explain a failed deployment from its log, deploy, add a
+  domain or create an app from a git repository, with your yes before any change.
+- **One-click updates** - the extension, Dokploy itself and a link to Harness's own updates, each checked before it
+  runs.
+- **The key stays put** - read from Harness's vault on each call, never shown to sessions, never sent anywhere but
+  your Dokploy.
 
 ## Install
 
-1. On the Harness server, as root:
+Needs Harness Maxxing with page extensions and a Dokploy the Harness server can reach (tested v0.30.10, v0.31.0).
+
+1. **Clone** on the Harness server, as root (`/root/maxxing` is the default workspace):
 
    ```bash
    git clone https://github.com/Anthony14FR/harness-maxxing-dokploy.git /root/maxxing/extensions/dokploy
    ```
 
-   (`/root/maxxing` is the default workspace: use yours if you changed it. The folder must be named `dokploy`.)
-2. **Settings -> Pages -> Rescan** (**Settings -> Extensions -> Reload** on older Harness versions), then open
-   **Dokploy** (pin it to keep it in the sidebar).
-3. **Settings -> Keys -> Add a key**: name `DOKPLOY_API_KEY`, your Dokploy API key as the value, and leave
-   **Expose to Harness sessions** off (the default): the extension reads the key without it.
-4. On the Dokploy page, check the address (default `http://127.0.0.1:3000`, Dokploy on the same server) and click
-   **Check and connect**.
-5. For Claude sessions, link the skill once (Claude Code does not read skills from extension folders; a link, not a
-   copy, so every `git pull` keeps it current):
+2. **Rescan**: Settings → Pages → **Rescan**, then turn on **In the sidebar** for Dokploy.
+3. **Key**: in Dokploy, Settings → Profile → **API/CLI Keys** → **Generate New Key** (shown once). In Harness,
+   Settings → Keys → **Add a key**: `DOKPLOY_API_KEY`, and leave **Expose to Harness sessions** off.
+4. **Connect**: on the Dokploy page, check the address (default `http://127.0.0.1:3000`) → **Check and connect**.
+5. **Sessions**: click **Link the skill for sessions** (once: the link follows every update).
 
-   ```bash
-   mkdir -p /root/maxxing/.claude/skills
-   ln -s /root/maxxing/extensions/dokploy/skill/dokploy /root/maxxing/.claude/skills/dokploy
-   ```
+<details>
+<summary>Linking the skill by hand, and coming from 1.x</summary>
 
-   The **Link the skill for sessions** button of the Dokploy page, or `dokploy.py link-skill`, does the same. The
-   linked `SKILL.md` is this extension's own file: do not edit it (a local change blocks the extension's updates).
+```bash
+mkdir -p /root/maxxing/.claude/skills
+ln -s /root/maxxing/extensions/dokploy/skill/dokploy /root/maxxing/.claude/skills/dokploy
+```
 
-   **Coming from 1.x?** Nothing breaks: the copy 1.x made keeps working, and updating the extension never replaces it.
-   Use the page's button or `dokploy.py link-skill` (not `ln -s`, which would put the link inside the existing
-   folder): the copy is moved aside, the link made, and the copy put back if anything fails. A folder holding your
-   own files is left as it is; a copy whose `SKILL.md` you edited by hand is replaced like any copy, keep your edits
-elsewhere first. `dokploy.py install-skill` from the 1.x instructions still works (it links).
+Do not edit the linked `SKILL.md`: a local change blocks the extension's updates. From 1.x nothing breaks: the old
+copy keeps working; the button (or `dokploy.py link-skill`, not `ln -s` over the existing folder) moves it aside,
+makes the link and puts the copy back if anything fails. A folder holding your own files is left alone.
+</details>
 
 ## Update
 
-On the Dokploy page, **Updates -> Check for updates** shows, for each part, what is installed and what is new:
+On the Dokploy page: **Updates → Check for updates**.
 
-- **This extension**: **Update** is offered only when it is clean: no file of the extension changed here, the new
-  version follows the installed one (fast-forward), its tests passed on GitHub, and it runs with your Harness. It then
-  pulls the new version, refreshes the sessions' skill, and the page reloads. Otherwise it says why.
-- **Dokploy**: its version and the latest one; **Update** asks you to type `dokploy`, then Dokploy updates itself to
-  its latest release (it takes no version: a release published in between would be the one installed). A second
-  click within five minutes is refused while Dokploy restarts. Measured on a test server
-  (v0.30.10 -> v0.31.0): the sites stay up (Traefik and the apps are not restarted), Dokploy's own page and API are
-  away for about two minutes.
-- **Harness Maxxing** updates itself, with its own checks and rollback, in **Settings -> Updates** (linked there).
+| Part | What happens |
+|---|---|
+| **This extension** | **Update** only when clean: no local change, fast-forward, its GitHub checks passed, supported by your Harness. Pulls exactly the commit you saw, refreshes the skill, reloads the page. |
+| **Dokploy** | Type `dokploy` to confirm; Dokploy updates itself to its latest release. Sites stay up; Dokploy's own page is away about two minutes. |
+| **Harness Maxxing** | Link to Settings → Updates (its own checks and rollback). |
 
-The extension updates only to the exact commit you confirmed, from what the check fetched. Its automatic update needs
-a public GitHub repository whose checks passed (this one): a private or non-GitHub copy is shown with the reason and
-is updated by hand. If git says the folder is owned by another user, run the commands below as that user, or
-`git config --global --add safe.directory /root/maxxing/extensions/dokploy`.
-Harness reloads an extension by itself when its files change, so no restart is needed. By hand, the same as the
-extension's button:
-
-```bash
-git -C /root/maxxing/extensions/dokploy pull --ff-only
-```
-
-## What it sends, and where
-
-- **Only to the Dokploy address you checked on the page**: Dokploy API calls (`GET|POST <address>/api/<procedure>`)
-  with your key in the `x-api-key` header. Reads: `project.all`, `application.one`, `compose.one`, `deployment.all`,
-  `deployment.allByCompose`, `docker.getContainersByAppNameMatch`, `docker.getStackContainersByAppName`. Writes, each
-  only after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` / `stop` /
-  `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
-  `application.saveBuildType`.
-- **For updates, only when you click Check or Update**: `settings.getDokployVersion`, `settings.getUpdateData` and,
-  after you confirm, `settings.updateServer` to Dokploy; `git fetch` / `git merge --ff-only` of this folder from the
-  repository it was cloned from; GitHub's public API (`GET /repos/<owner>/<repo>/commits/<sha>/check-runs`, no token)
-  to see that the new version passed its tests. Updating runs new code of this extension as root, the same trust as
-  the first `git clone`.
-- Nothing else, to nobody else: no telemetry, no other host. Redirects are not followed, so the key is never sent to
-  another address.
-- Plain `http://` is accepted only for this machine, a private network or a Tailscale address; anything else needs
-  `https://`.
-
-## How the key is kept
-
-- The key lives only in **Settings -> Keys** (`DOKPLOY_API_KEY`). The page's `api.py` reads it with `ctx.secret()`;
-  the session script reads it with `maxxing keys get` inside its own process, for each call. It is never written in
-  this folder, never printed, and never put in the environment of sessions.
-- The extension's state folder (`/var/lib/claude-maxxing/extensions/dokploy/settings.json`, root only) keeps the
-  Dokploy address, a fingerprint of the key it was checked with (never the key) and the protected services. A key
-  changed in Keys is not used until you check it again on the page.
-- The script warns when `DOKPLOY_API_KEY` is exposed to sessions.
-- Claude sessions run as root on a standard install: these rules keep the key out of their environment, prompts and
-  output, they are not a wall against a session that sets out to read the vault.
+By hand, the same as the button: `git -C /root/maxxing/extensions/dokploy pull --ff-only`. Folder owned by another
+user: `git config --global --add safe.directory /root/maxxing/extensions/dokploy`.
 
 ## For Claude sessions
 
-The skill teaches Claude these commands (`skill/dokploy/SKILL.md`):
-
 ```bash
 D=/root/maxxing/extensions/dokploy/dokploy.py
-python3 $D status
-python3 $D link-skill
-python3 $D updates [--json]
-python3 $D list [--json]
-python3 $D environments [--json]
-python3 $D deployments APP [--json]
-python3 $D health APP [--json]
+python3 $D list                     # everything, with last deployment and domains
+python3 $D health APP               # containers really running + routed hosts
+python3 $D logs APP                 # last deployment log
+python3 $D deploy APP --yes         # every write needs --yes, added only after you agreed
+```
+
+<details>
+<summary>All commands</summary>
+
+```bash
+python3 $D status | link-skill | updates [--json]
+python3 $D list | environments [--json]
+python3 $D deployments | health APP [--json]
 python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D domain list APP
-python3 $D deploy|redeploy APP --yes
-python3 $D stop|start|rollback APP --yes
+python3 $D deploy | redeploy | stop | start | rollback APP --yes
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build T] --yes
 ```
 
-A protected service refuses deploy, redeploy, stop, start, rollback and domain add, even with `--yes`, and the script has no command to lift
-the protection. Like `--yes`, it guards the page and the commands Claude is told to use; it is not a lock against a
-root session set on going around it.
-Every write needs `--yes`, which the skill tells Claude to add only after you agreed; without it the command stops
-(exit code 3) and changes nothing. That is how Claude is told to work, not a lock: review what it proposes. Values
-passed on to Dokploy (git URL, branch, names, host, port, path) are validated first. Deployment logs are read from
-Dokploy's log folder on this server only, and can contain values a build printed: keep secrets out of build output.
+Without `--yes` a write stops (exit 3) and changes nothing. A protected service refuses every write, even with
+`--yes`, and there is no command to lift it. Values passed to Dokploy (git URL, branch, names, host, port, path) are
+validated first.
+</details>
+
+## Security
+
+> **Community extension, not reviewed by the Harness Maxxing maintainers.** Like every extension, `api.py` runs
+> inside the Harness server with its rights (root on a standard install). Read the code before installing it.
+
+- **One destination**: only the Dokploy address you checked, with the key in `x-api-key`. No telemetry, no redirect
+  followed, `https://` required outside this machine, a private network or Tailscale.
+- **The key**: lives only in Settings → Keys; read per call (`ctx.secret()` for the page, `maxxing keys get` for the
+  script), never written here, printed or put in a session's environment. The state folder keeps the address, a
+  fingerprint of the key and the protected services.
+- **Updates**: only when you click: Dokploy's version calls, `git fetch` / `merge --ff-only` of this folder, and
+  GitHub's public check-runs API (no token).
+- **Limits**: `--yes` and protection guide the page and the commands Claude is told to use; they are not a wall
+  against a root session set on going around them. Deployment logs can contain what a build printed.
+
+<details>
+<summary>Every Dokploy call it makes</summary>
+
+- Reads: `project.all`, `application.one`, `compose.one`, `deployment.all`, `deployment.allByCompose`,
+  `docker.getContainersByAppNameMatch`, `docker.getStackContainersByAppName`, `docker.getConfig` (a compose's running
+  containers: only their Traefik routing labels are kept, the rest, environment included, is dropped at once).
+- Writes, each after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
+  `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
+  `application.saveBuildType`.
+- Updates: `settings.getDokployVersion`, `settings.getUpdateData`, and after you confirm `settings.updateServer`.
+</details>
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md): report it privately, not in an issue.
 
 ## Remove it
 
 ```bash
-rm -rf /root/maxxing/extensions/dokploy /var/lib/claude-maxxing/extensions/dokploy
-rm -rf /root/maxxing/.claude/skills/dokploy   # the link (or the copy 1.x made)
+rm -rf /root/maxxing/extensions/dokploy /var/lib/claude-maxxing/extensions/dokploy /root/maxxing/.claude/skills/dokploy
 ```
 
-Then **Settings -> Pages -> Rescan** (or **Extensions -> Reload**), delete `DOKPLOY_API_KEY` in **Settings -> Keys**, and revoke the key in
-Dokploy. Your Dokploy, its apps and their domains are left as they are.
+Then Settings → Pages → **Rescan**, delete `DOKPLOY_API_KEY` in Settings → Keys and revoke the key in Dokploy. Your
+Dokploy and its apps are left as they are.
 
-## Development
+## Contributing
 
-Standard library only (Python 3.11+). Tests run against a local fake Dokploy and a fake `maxxing` command:
+Issues and pull requests are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md) first. Standard library only, tests
+against a fake Dokploy:
 
 ```bash
-uv run --with pytest pytest
-uv run --with ruff ruff check . && uv run --with ruff ruff format --check .
-node --check page.js
+uv run --with pytest pytest && uv run --with ruff ruff check . && uv run --with ruff ruff format --check .
 ```
 
 ## License
 
-[MIT](LICENSE). Harness Maxxing and Dokploy are the projects of their own authors; this extension is not
-affiliated with either.
+[MIT](LICENSE). Harness Maxxing and Dokploy belong to their own authors; this extension is affiliated with neither.
