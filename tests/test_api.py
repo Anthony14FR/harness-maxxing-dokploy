@@ -138,7 +138,22 @@ def test_the_page_offers_and_installs_the_skill(api, state):
     keys = {}
     assert api.handle(ctx(state, keys), "GET", "status", {}, None)["skill"] == "missing"
     assert api.handle(ctx(state, keys), "POST", "skill", {}, None) == {"skill": "ok"}
-    assert (state.parent.parent / "ws" / ".claude" / "skills" / "dokploy" / "SKILL.md").is_file()
+    assert (state.parent.parent / "ws" / ".claude" / "skills" / "dokploy").is_symlink()
+
+
+def test_the_page_offers_to_link_a_1x_copy_and_never_touches_a_custom_one(api, state):
+    keys = {}
+    dest = state.parent.parent / "ws" / ".claude" / "skills" / "dokploy"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("1.1.0 copy")
+    (dest / "notes.md").write_text("the user's")
+    assert api.handle(ctx(state, keys), "GET", "status", {}, None)["skill"] == "custom"
+    code, err = api.handle(ctx(state, keys), "POST", "skill", {}, None)
+    assert code == 409 and err["error"] == "skill_custom" and "notes.md" in err["message"]
+    assert (dest / "notes.md").read_text() == "the user's"
+    (dest / "notes.md").unlink()
+    assert api.handle(ctx(state, keys), "GET", "status", {}, None)["skill"] == "copied"
+    assert api.handle(ctx(state, keys), "POST", "skill", {}, None) == {"skill": "ok"}
 
 
 def test_skill_errors_from_the_page(api, state):

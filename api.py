@@ -38,7 +38,7 @@ def handle(ctx, method, path, query, body):
     try:
         if path == "status" and method == "GET":
             return {**core.status(state, secret), "skill": core.skill_state(ctx.get("workspace"))}
-        if path == "skill" and method == "POST":  # the user's button: copy the skill for Claude sessions
+        if path == "skill" and method == "POST":  # the user's button: link the skill for Claude sessions
             if not ctx.get("workspace"):
                 return 409, {"error": "skill_failed", "message": "Harness gave no workspace"}
             core.install_skill(ctx["workspace"])
@@ -64,8 +64,10 @@ def handle(ctx, method, path, query, body):
             if what == "extension":
                 chk = core.ext_update(core.EXT_DIR, _supported_api(), to)
                 if ctx.get("workspace"):
-                    with contextlib.suppress(core.DokployError):  # the page still offers the skill button
-                        core.install_skill(ctx["workspace"])
+                    with contextlib.suppress(
+                        core.DokployError
+                    ):  # links only a missing skill: a copy waits for the user
+                        core.install_skill(ctx["workspace"], replace_copy=False)
                 return {"updated": "extension", "version": chk["new"]}
             if what == "dokploy":
                 chk = core.dokploy_update(core.client(state, secret, timeout=8), to, state)
@@ -128,6 +130,7 @@ def handle(ctx, method, path, query, body):
             "deploy_in_progress": 409,
             "target_changed": 409,
             "skill_linked": 409,
+            "skill_custom": 409,
             "skill_failed": 409,
             "update_refused": 409,
             "update_failed": 409,

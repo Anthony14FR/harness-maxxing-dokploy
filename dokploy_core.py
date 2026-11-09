@@ -10,12 +10,15 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -225,7 +228,9 @@ def client(state_dir: str | Path, secret: Secret, timeout: float = TIMEOUT) -> C
 
 
 # ---- the skill sessions read ---------------------------------------------------------------------------------
-SKILL_SRC = Path(__file__).resolve().parent / "skill" / "dokploy"
+SKILL_SRC = Path(  # DOKPLOY_SKILL_SRC: tests only, so they never link or write the repository's own files
+    os.environ.get("DOKPLOY_SKILL_SRC") or Path(__file__).resolve().parent / "skill" / "dokploy"
+).resolve()
 
 
 def skill_dest(workspace: str | Path) -> Path:
@@ -236,46 +241,87 @@ def _files(d: Path) -> dict[str, bytes]:
     return {f.name: f.read_bytes() for f in d.iterdir() if f.is_file()} if d.is_dir() else {}
 
 
+def _custom(dest: Path) -> list[str]:
+    """What in a real skill folder is not a plain copy of the shipped files (the user's own: never removed)."""
+    ours = _files(SKILL_SRC)
+    return sorted(f.name for f in dest.iterdir() if f.name not in ours or f.is_symlink() or not f.is_file())
+
+
 def skill_state(workspace: str | Path | None) -> str:
-    """ok, missing, stale, linked (elsewhere: left alone) or broken (nothing shipped); never raises."""
+    """ok, missing, copied (a 1.x copy, still read), custom (a copy with the user's files), linked, broken; no raise."""
     try:
-        src, dest = _files(SKILL_SRC), skill_dest(workspace)
-        if not src:
+        if not _files(SKILL_SRC):
             return "broken"
-        if dest.is_symlink() and dest.resolve() != SKILL_SRC:
-            return "linked"
-        if not (dest / "SKILL.md").is_file():
-            return "missing"
-        have = {n: (dest / n).read_bytes() if (dest / n).is_file() else None for n in src}
-        return "ok" if have == src else "stale"
+        dest = skill_dest(workspace)
+        if dest.is_symlink():
+            if dest.resolve() == SKILL_SRC:
+                return "ok"
+            return "linked" if dest.exists() else "missing"  # a dead link is repaired like a missing skill
+        if dest.is_dir() and (dest / "SKILL.md").is_file():
+            return "custom" if _custom(dest) else "copied"
+        if not dest.exists() or (dest.is_dir() and not any(dest.iterdir())):
+            return "missing"  # nothing, or an empty folder: install_skill replaces it
+        return "custom"
     except (OSError, TypeError, ValueError):
         return "missing"
 
 
-def install_skill(workspace: str | Path) -> Path:
-    """Writes the shipped skill files into <workspace>/.claude/skills/dokploy; other files there are never touched."""
+_SKILL_LOCK = threading.Lock()  # one link at a time: the update route and the button can run together
+
+
+def install_skill(workspace: str | Path, replace_copy: bool = True) -> Path:
+    with _SKILL_LOCK:
+        return _install_skill(workspace, replace_copy)
+
+
+def _install_skill(workspace: str | Path, replace_copy: bool) -> Path:
+    """Links <workspace>/.claude/skills/dokploy to this extension's skill (a link follows every git pull).
+
+    A 1.x copy is replaced only when `replace_copy` and it holds nothing but the shipped files; it is moved aside
+    first and put back if anything fails, so the sessions never lose their skill.
+    """
     dest = skill_dest(workspace)
-    if dest.is_symlink():
-        if dest.resolve() == SKILL_SRC:
-            return dest  # already linked to this folder (Harness may link extension skills itself)
-        raise DokployError("skill_linked", f"{dest} links somewhere else: remove that link first")
+    if not _files(SKILL_SRC):
+        raise DokployError("skill_failed", f"{SKILL_SRC} is empty: update the extension (git pull)")
+    if dest.is_symlink() and dest.resolve() == SKILL_SRC:
+        return dest
+    if dest.is_symlink() and dest.exists():
+        raise DokployError("skill_linked", f"{dest} links to another folder: remove that link first")
+    claude = dest.parent.parent  # <workspace>/.claude: the aside copy never sits among the skills Claude reads
+    for old in dest.parent.glob(".dokploy-link-*"):
+        with contextlib.suppress(OSError):  # a temp link an interrupted run left
+            old.unlink()
+    for old in claude.glob(".dokploy-old-*"):  # a copy an interrupted run moved aside
+        with contextlib.suppress(OSError):
+            if not dest.exists() and not dest.is_symlink():
+                os.rename(old, dest)  # it may be the only copy left: give it back first
+            else:
+                shutil.rmtree(old)
+    tag = uuid.uuid4().hex[:12]
+    aside, tmp = claude / f".dokploy-old-{tag}", dest.with_name(f".dokploy-link-{tag}")
+    moved = False
     try:
-        src = _files(SKILL_SRC)
-        if not src:
-            raise DokployError("skill_failed", f"{SKILL_SRC} is empty: update the extension (git pull)")
-        dest.mkdir(parents=True, exist_ok=True)
-        for name, data in src.items():
-            fd, tmp = tempfile.mkstemp(dir=dest, prefix=f".{name}-")
-            try:
-                with os.fdopen(fd, "wb") as fh:
-                    fh.write(data)
-                os.chmod(tmp, 0o644)
-                os.replace(tmp, dest / name)  # atomic, and replaces a link instead of writing through it
-            except BaseException:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+        if dest.exists() and not dest.is_symlink():
+            if not dest.is_dir() or _custom(dest):
+                found = ", ".join(_custom(dest)) if dest.is_dir() else "not a folder"
+                raise DokployError("skill_custom", f"{dest} holds your own files ({found}): it is left as it is")
+            if not replace_copy:
+                return dest  # the 1.x copy keeps working; the page offers to link it
+            os.rename(dest, aside)
+            moved = True
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(SKILL_SRC, target_is_directory=True)
+        os.replace(tmp, dest)  # atomic, also over a dead link
     except OSError as e:
-        raise DokployError("skill_failed", f"cannot copy the skill to {dest}: {e.strerror or e}") from None
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        if moved:
+            with contextlib.suppress(OSError):
+                os.rename(aside, dest)  # put the copy back: never leave the sessions without a skill
+        raise DokployError("skill_failed", f"cannot link the skill at {dest}: {e.strerror or e}") from None
+    if moved:
+        shutil.rmtree(aside, ignore_errors=True)
     return dest
 
 
