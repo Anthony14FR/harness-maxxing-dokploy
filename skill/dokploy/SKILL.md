@@ -40,7 +40,9 @@ python3 $D app create --environment ID --name N --repo URL [--branch B] [--build
 - **`list` shows the last deployment, not whether the site is up**: `done` can hide a container that died since. To
   answer "is it up?", run `health APP`: `ok`, `partial` (some containers down), `down`, `stopped` (0 replicas wanted,
   or every container exited cleanly) or `unknown` (Dokploy cannot match its containers: check in Dokploy), with
-  running / expected containers. It always exits 0: read the first word.
+  running / expected containers. It always exits 0: read the first word. For a compose it also lists the hosts its
+  own Traefik labels route (`routed`): live, but not Dokploy domains, so never `domain add` them (that would make a
+  second router for the same host).
 - **Updates are the user's.** `updates` only reads: never update the extension, Dokploy or Harness yourself; tell
   the user to use **Updates** on the Dokploy page (Harness: Settings -> Updates).
 - If `status` says this skill is missing or a copy, tell the user: the **Link the skill for sessions** button of

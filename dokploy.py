@@ -283,6 +283,10 @@ def run(a: argparse.Namespace) -> int:
         print(f"{hl['state']}  {hl['running']}{want} running")
         for b in hl["containers"]:
             print(f"  {(b['state'] or '-'):<10} {b['name']}  {b['status'] or ''}")
+        for d in hl.get("routed") or []:  # hosts a compose routes with its own Traefik labels
+            print(
+                f"  routed     {'https' if d['https'] else 'http'}://{d['host']}{d['path'] if d['path'] != '/' else ''}"
+            )
         return 0
     if a.action == "deployments":
         deps = core.deployments(c, svc)

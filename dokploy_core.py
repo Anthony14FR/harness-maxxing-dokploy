@@ -895,6 +895,58 @@ def _mine(name: str, app: str, kind: str) -> bool:
     return name.startswith(app + "_") or bool(re.match(rf"^{re.escape(app)}-[A-Za-z0-9._-]+-\d+$", name))
 
 
+_ROUTER = re.compile(r"^traefik\.http\.routers\.([^.]+)\.rule$")
+_RULE_HOST = re.compile(r"\bHost\(([^)]*)\)")
+_RULE_PREFIX = re.compile(r"\bPathPrefix\(`([^`]+)`\)")
+LABEL_CONTAINERS = 10  # docker.getConfig calls per compose, at most
+
+
+def label_domains(labels: Any) -> list[dict]:
+    """Hosts a container's own Traefik labels route: {host, https, port, path}, one per host."""
+    if not isinstance(labels, dict) or str(labels.get("traefik.enable", "true")).lower() == "false":
+        return []
+    out: dict[str, dict] = {}
+    for key, rule in labels.items():
+        m = _ROUTER.match(str(key))
+        if not m or not isinstance(rule, str):
+            continue
+        r = f"traefik.http.routers.{m[1]}."
+        https = (
+            "websecure" in str(labels.get(r + "entrypoints") or "")
+            or str(labels.get(r + "tls") or "").lower() == "true"
+            or bool(labels.get(r + "tls.certresolver"))
+        )
+        prefix = _RULE_PREFIX.search(rule)
+        path = prefix[1] if prefix and PATH_RE.match(prefix[1]) else "/"
+        for args in _RULE_HOST.findall(rule):
+            for host in re.findall(r"`([^`]+)`", args):
+                host = host.lower()
+                if not HOST_RE.match(host):
+                    continue
+                d = out.setdefault(host, {"host": host, "https": False, "port": None, "path": path})
+                d["https"] = d["https"] or https  # an http router that redirects sits next to the https one
+    return list(out.values())
+
+
+def _routed(c: Client, svc: dict, rows: list[dict]) -> list[dict]:
+    """Domains a compose routes through its own Traefik labels, beyond its Dokploy domains (labels only: the rest of
+    docker inspect, env included, is dropped here)."""
+    known = {str(d.get("host") or "").lower() for d in svc.get("domains") or []}
+    out: dict[str, dict] = {}
+    ids = [str(r["containerId"]) for r in rows if r.get("containerId") and r.get("state") == "running"]
+    for cid in ids[:LABEL_CONTAINERS]:
+        params = {"containerId": cid, **({"serverId": svc["server_id"]} if svc.get("server_id") else {})}
+        try:
+            cfg = c.get("docker.getConfig", params)
+        except DokployError:
+            continue  # a container gone between the two calls, or an older Dokploy: its domains stay unknown
+        labels = ((cfg or {}).get("Config") or {}).get("Labels") if isinstance(cfg, dict) else None
+        for d in label_domains(labels):
+            if d["host"] not in known:
+                out.setdefault(d["host"], d)
+    return list(out.values())
+
+
 def health(c: Client, svc: dict) -> dict:
     """Containers really running, not the last deployment; state: ok, partial, down, stopped or unknown."""
     _deployable(svc)
@@ -906,10 +958,10 @@ def health(c: Client, svc: dict) -> dict:
     if svc["kind"] == "compose" and not stack:
         params["appType"] = "docker-compose"
     rows = c.get("docker.getStackContainersByAppName" if stack else "docker.getContainersByAppNameMatch", params) or []
+    rows = [r for r in rows if isinstance(r, dict) and _mine(str(r.get("name") or ""), app, svc["kind"])]
     boxes = [
         {"name": str(r.get("name") or ""), "state": r.get("state"), "status": r.get("status") or r.get("currentState")}
         for r in rows
-        if isinstance(r, dict) and _mine(str(r.get("name") or ""), app, svc["kind"])
     ]
     if stack:  # swarm keeps old tasks: a slot (service.N) is up when one of its tasks runs
         slots: dict[str, bool] = {}
@@ -933,7 +985,10 @@ def health(c: Client, svc: dict) -> dict:
         state = "down"
     else:
         state = "ok" if running >= expected else "partial"
-    return {"state": state, "running": running, "expected": expected, "containers": boxes}
+    out = {"state": state, "running": running, "expected": expected, "containers": boxes}
+    if svc["kind"] == "compose" and not stack:  # a swarm stack's labels sit on its services, not its containers
+        out["routed"] = _routed(c, svc, rows)
+    return out
 
 
 def deployments(c: Client, svc: dict) -> list[dict]:

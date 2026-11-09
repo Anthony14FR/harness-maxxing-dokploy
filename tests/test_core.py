@@ -297,6 +297,48 @@ def test_health_counts_only_this_service_real_containers(core, fake):
         core.health(c, core.find(svcs, "pg1"))
 
 
+def test_a_compose_routing_its_own_hosts_shows_them(core, fake):
+    # a compose may carry its Traefik routes as labels instead of Dokploy domains: the page showed "-" for a live site
+    c = core.Client(fake.url, KEY)
+    svcs = core.inventory(c)
+    stack = core.find(svcs, "c1")
+    routed = core.health(c, stack)["routed"]
+    assert routed == [
+        {"host": "shop.example.com", "https": True, "port": None, "path": "/"},  # its http twin only redirects
+        {"host": "www.shop.example.com", "https": True, "port": None, "path": "/"},
+        {"host": "api.shop.example.com", "https": True, "port": None, "path": "/v1"},
+    ]
+    gets = [d["containerId"] for _, p, d in fake.calls if p == "docker.getConfig"]
+    assert gets == ["2"]  # running containers of this compose only
+    assert "do-not-leak" not in str(core.health(c, stack))
+    # a host Dokploy already lists is not repeated; an application's labels are Dokploy's own: not read
+    assert (
+        core._routed(
+            c, {**stack, "domains": [{"host": "Shop.example.com"}]}, [{"containerId": "2", "state": "running"}]
+        )[0]["host"]
+        == "www.shop.example.com"
+    )
+    assert "routed" not in core.health(c, core.find(svcs, "a1"))
+
+
+def test_label_domains_reads_only_routing_rules(core):
+    assert core.label_domains(None) == []
+    assert core.label_domains({"traefik.enable": "false", "traefik.http.routers.a.rule": "Host(`a.example.com`)"}) == []
+    assert core.label_domains({"traefik.http.routers.a.rule": "Host(`a.example.com`, `b.example.com`)"}) == [
+        {"host": "a.example.com", "https": False, "port": None, "path": "/"},
+        {"host": "b.example.com", "https": False, "port": None, "path": "/"},
+    ]
+    bad = {"traefik.http.routers.a.rule": "Host(`javascript:x`) || Host(`a b`) || HostSNI(`*`)"}
+    assert core.label_domains(bad) == []
+    assert core.label_domains({"traefik.tcp.routers.a.rule": "HostSNI(`db.example.com`)"}) == []
+
+
+def test_routed_domains_survive_a_missing_container(core, fake):
+    c = core.Client(fake.url, KEY)
+    stack = core.find(core.inventory(c), "c1")
+    assert core._routed(c, stack, [{"containerId": "gone", "state": "running"}]) == []
+
+
 def test_health_of_a_swarm_stack_counts_slots(core, fake):
     c = core.Client(fake.url, KEY)
     c1 = core.find(core.inventory(c), "c1")
