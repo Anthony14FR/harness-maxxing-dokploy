@@ -571,7 +571,7 @@ export function mount(el, ctx) {
     else if (tr.version_status === "outdated") {
       parts.push(h("span", {}, u.available(tr.version || "?", tr.recommended || "?")), h("div", {}, btn(u.updateTrf, "download",
         () => slot.replaceChildren(confirmPanel({ name: "traefik" }, u.confirmTrf(tr.version || "?", tr.recommended),
-          () => updateTraefik(tr.recommended, onDone), () => slot.replaceChildren(), ["traefik_restart"])), "ui-btn ui-sm")));
+          () => { updateTraefik(tr.recommended, onDone); }, () => slot.replaceChildren(), ["traefik_restart"])), "ui-btn ui-sm")));  // the panel closes at once, the notice follows it
     } else parts.push(h("span", { class: "ui-muted" }, u.upToDate(tr.version || "?")));
     if (tr.error && !tr.updating) parts.push(h("span", { class: "ui-small", style: "color:var(--destructive)" }, u.trfLastError(tr.error)));
     return parts;
