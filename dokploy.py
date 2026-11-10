@@ -209,6 +209,9 @@ def alerts(st: Path, dry_run: bool) -> int:
         dash, err = None, e.message
     if dash is not None and all(v is None for v in dash.values()):  # every read failed: Dokploy is away
         dash, err = None, "no answer from Dokploy"
+    if dash is not None:  # the served certificates too, so an expiry or a broken one becomes an alert
+        hosts = [d["host"] for d in dash.get("domains") or [] if d.get("https") and d.get("enabled") is not False]
+        dash["certs"] = core.check_certificates(st, hosts)
     issues = core.alert_issues(dash, now, language(), err)
     posts, nxt = core.alert_diff(core.load_alert_state(st), issues, now)
     for p in posts:

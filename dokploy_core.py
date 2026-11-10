@@ -1350,6 +1350,7 @@ def deployment_log(c: Client, dep_id: str, lines: int = 300) -> dict:
 ALERT_WINDOW = 6 * 3600
 ALERT_SEEN_MAX = 300
 DISK_ALERT, MEM_ALERT = 90, 95
+CERT_ALERT_DAYS = 14
 ALERT_TEXT = {
     "en": {
         "deploy": "Deployment of {svc} failed",
@@ -1366,6 +1367,9 @@ ALERT_TEXT = {
         "traefik_ok": "Traefik update error cleared",
         "unreachable": "Dokploy does not answer",
         "unreachable_ok": "Dokploy answers again",
+        "cert_bad": "Certificate of {host} not trusted",
+        "cert_soon": "Certificate of {host} expires in {n} days",
+        "cert_ok": "Certificate of {host} fine again",
     },
     "fr": {
         "deploy": "Échec du déploiement de {svc}",
@@ -1382,6 +1386,9 @@ ALERT_TEXT = {
         "traefik_ok": "Erreur de mise à jour de Traefik levée",
         "unreachable": "Dokploy ne répond pas",
         "unreachable_ok": "Dokploy répond de nouveau",
+        "cert_bad": "Certificat de {host} non reconnu",
+        "cert_soon": "Le certificat de {host} expire dans {n} jours",
+        "cert_ok": "Certificat de {host} de nouveau correct",
     },
 }
 
@@ -1447,6 +1454,23 @@ def alert_issues(dash: dict | None, now: float, lang: str = "en", error: str | N
             "body": "",
             "ok": tx["mem_ok"].format(p=MEM_ALERT),
         }
+    for crt in dash.get("certs") or []:  # filled by the alerts command: the served certificate of each HTTPS host
+        host = crt.get("host")
+        ok = tx["cert_ok"].format(host=host)
+        if crt.get("days_left") is not None and crt["days_left"] <= CERT_ALERT_DAYS:
+            out[f"cert-exp:{host}"] = {
+                "level": "warning",
+                "title": tx["cert_soon"].format(host=host, n=crt["days_left"]),
+                "body": crt.get("not_after") or "",
+                "ok": ok,
+            }
+        elif not crt.get("valid") and crt.get("not_after"):  # served but not trusted (self-signed, wrong name...)
+            out[f"cert:{host}"] = {
+                "level": "warning",
+                "title": tx["cert_bad"].format(host=host),
+                "body": crt.get("error") or "",
+                "ok": ok,
+            }
     tr = dash.get("traefik") or {}
     if tr.get("error") and not tr.get("updating"):
         out["traefik"] = {"level": "warning", "title": tx["traefik"], "body": tr["error"], "ok": tx["traefik_ok"]}
@@ -1653,3 +1677,94 @@ def live_stats(c: Client) -> dict:
         acc["containers"] += 1
     rnd = lambda d: {**d, "cpu": round(d["cpu"], 2), "mem_pct": round(d["mem_pct"], 2), "mem": int(d["mem"])}  # noqa: E731
     return {"at": time.time(), "services": [rnd(s) for s in out.values() if s["containers"]], "others": rnd(others)}
+
+
+# Certificates as visitors see them: a TLS handshake to Dokploy's server with each HTTPS domain's name, reading only
+# what the served certificate says (expiry, issuer, whether a browser accepts it). certificates.all is never called:
+# it returns private keys.
+CERT_MAX_HOSTS = 50
+CERT_TIMEOUT = 4.0
+
+
+def _der_items(b: bytes, i: int, end: int):
+    """(tag, start, stop) of each DER element in b[i:end]."""
+    while i < end:
+        tag, n = b[i], b[i + 1]
+        i += 2
+        if n & 0x80:
+            k = n & 0x7F
+            n = int.from_bytes(b[i : i + k], "big")
+            i += k
+        yield tag, i, i + n
+        i += n
+
+
+def cert_not_after(der: bytes) -> dt.datetime | None:
+    """notAfter of an X.509 certificate (DER), read without any third-party parser."""
+    try:
+        _, s, e = next(_der_items(der, 0, len(der)))  # Certificate
+        _, s, e = next(_der_items(der, s, e))  # TBSCertificate
+        parts = list(_der_items(der, s, e))
+        if parts[0][0] == 0xA0:  # [0] version
+            parts = parts[1:]
+        _, vs, ve = parts[3]  # serial, signature, issuer, validity
+        tag, ts, te = list(_der_items(der, vs, ve))[1]
+        raw = der[ts:te].decode()
+        fmt = "%y%m%d%H%M%SZ" if tag == 0x17 else "%Y%m%d%H%M%SZ"  # UTCTime or GeneralizedTime
+        return dt.datetime.strptime(raw, fmt).replace(tzinfo=dt.UTC)
+    except (StopIteration, IndexError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _issuer(cert: dict) -> str | None:
+    names = dict(x[0] for x in cert.get("issuer", ()) if x)
+    return names.get("organizationName") or names.get("commonName")
+
+
+def check_certificate(address: str, host: str, port: int = 443, now: dt.datetime | None = None) -> dict:
+    """{host, valid, days_left, not_after, issuer, error} of the certificate served for host at address."""
+    import socket
+    import ssl
+
+    now = now or dt.datetime.now(dt.UTC)
+    out: dict = {"host": host, "valid": False, "days_left": None, "not_after": None, "issuer": None, "error": None}
+    raw = ssl.create_default_context()
+    raw.check_hostname, raw.verify_mode = False, ssl.CERT_NONE
+    try:
+        with (
+            socket.create_connection((address, port), timeout=CERT_TIMEOUT) as sock,
+            raw.wrap_socket(sock, server_hostname=host) as tls,
+        ):
+            der = tls.getpeercert(binary_form=True)
+    except (OSError, ssl.SSLError) as e:
+        out["error"] = f"no TLS answer ({type(e).__name__})"
+        return out
+    end = cert_not_after(der or b"")
+    if end:
+        out["not_after"] = end.isoformat()
+        out["days_left"] = int((end - now).total_seconds() // 86400)
+    try:
+        with (
+            socket.create_connection((address, port), timeout=CERT_TIMEOUT) as sock,
+            ssl.create_default_context().wrap_socket(sock, server_hostname=host) as tls,
+        ):
+            out["issuer"] = _issuer(tls.getpeercert() or {})
+            out["valid"] = True
+    except ssl.SSLCertVerificationError as e:
+        out["error"] = str(e.verify_message or e.reason or "not trusted")[:120]
+    except (OSError, ssl.SSLError) as e:
+        out["error"] = f"handshake failed ({type(e).__name__})"
+    return out
+
+
+def check_certificates(state_dir: str | Path, hosts: list[str]) -> list[dict]:
+    """Each HTTPS host checked against Dokploy's own server (the address the page connected to), 8 at a time."""
+    url = load_settings(state_dir).get("url") or DEFAULT_URL
+    address = urllib.parse.urlsplit(url).hostname or "127.0.0.1"
+    if os.environ.get("DOKPLOY_NO_TLS_CHECK"):  # the test suite: never a handshake to a real server
+        return []
+    todo = [h for h in dict.fromkeys(hosts) if HOST_RE.match(str(h).lower())][:CERT_MAX_HOSTS]
+    if not todo:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
+        return list(ex.map(lambda h: check_certificate(address, h), todo))

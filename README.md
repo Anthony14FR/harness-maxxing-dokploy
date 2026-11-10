@@ -32,7 +32,8 @@ flowchart LR
   - **Services**: every app, stack and database with its last deployment, the containers really running
     (`running 2/2`, `partly down`, `down`), its domains and its actions; search and a Problems filter; **Logs**: what
     its container prints now (pick the container of a stack, a period, a search, **Follow** every 3 s);
-  - **Domains**: every domain, HTTPS or not, its certificate, and the ones a compose routes with its own Traefik labels;
+  - **Domains**: every domain, HTTPS or not, the certificate visitors really get (days left, issuer, trusted or not),
+    and the ones a compose routes with its own Traefik labels;
   - **Databases**: their containers and their backups (schedule, last run, destination), with **Back up now**;
   - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
   - **Server**: **live usage** (CPU and memory of every service and of all containers, sampled every 5 s while the
@@ -94,6 +95,7 @@ Overview → **Alerts** → **Turn alerts on** creates a Harness cron job, **Dok
 | A service is down: none of its containers runs although its last deployment succeeded | error, then "back up" |
 | Disk at 90 % or more, memory at 95 % or more | warning, then "below" |
 | Traefik's last update failed; Dokploy does not answer | warning / error, then cleared |
+| A certificate expires within 14 days, or is not trusted (self-signed, wrong name) | warning, then "fine again" |
 
 The check only reads Dokploy. Telegram follows the rule of the **Dokploy** source in Settings → Notifications. Turn
 alerts off from the same card (the job stays, disabled); `dokploy.py alerts --dry-run` prints what it would post.
@@ -150,7 +152,9 @@ validated first.
 > **Community extension, not reviewed by the Harness Maxxing maintainers.** Like every extension, `api.py` runs
 > inside the Harness server with its rights (root on a standard install). Read the code before installing it.
 
-- **One destination**: only the Dokploy address you checked, with the key in `x-api-key`. No telemetry, no redirect
+- **One destination**: only the Dokploy address you checked, with the key in `x-api-key` (and, for certificates, a TLS
+  handshake to that same address with each HTTPS domain's name: no key, nothing sent; `certificates.all` is never
+  called, it returns private keys). No telemetry, no redirect
   followed, `https://` required outside this machine, a private network or Tailscale.
 - **The key**: lives only in Settings → Keys; read per call (`ctx.secret()` for the page, `maxxing keys get` for the
   script), never written here, printed or put in a session's environment. The state folder keeps the address, a

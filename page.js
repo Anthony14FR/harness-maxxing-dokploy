@@ -112,7 +112,9 @@ const T = {
       more: "More", logsOf: (n) => `Logs of ${n}`,
       live: { btn: "Logs", title: (n) => `Logs of ${n}`, follow: "Follow", since: "Since", search: "Search the logs", container: "Container",
         empty: "Nothing printed in this period.", ranges: [["15m", "15 min"], ["1h", "1 hour"], ["24h", "24 hours"], ["all", "Everything"]] },
-      dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "Disabled", none: "No domain yet." },
+      dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "Disabled", none: "No domain yet.",
+        certDays: (n) => (n < 0 ? "Expired" : `${n} days left`), certBad: "Not trusted", certNone: "No TLS answer", certChecking: "Checking…",
+        certBy: (i) => `Issued by ${i}`, certUntil: (w) => `Valid until ${w}` },
       db: { title: "Databases", backups: "Backups", none: "No database in Dokploy.", noBackup: "No backup scheduled: add one in Dokploy (a destination is needed).",
         cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active", ""],
         keep: (n) => (n ? `${n} latest` : "all"), never: "never run", run: "Back up now", runQ: (n) => `Back up ${n} now?`,
@@ -249,7 +251,9 @@ const T = {
       more: "Plus", logsOf: (n) => `Logs de ${n}`,
       live: { btn: "Logs", title: (n) => `Logs de ${n}`, follow: "Suivre", since: "Depuis", search: "Rechercher dans les logs", container: "Conteneur",
         empty: "Rien d’affiché sur cette période.", ranges: [["15m", "15 min"], ["1h", "1 heure"], ["24h", "24 heures"], ["all", "Tout"]] },
-      dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "Désactivé", none: "Aucun domaine pour l’instant." },
+      dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "Désactivé", none: "Aucun domaine pour l’instant.",
+        certDays: (n) => (n < 0 ? "Expiré" : `Expire dans ${n} j`), certBad: "Non reconnu", certNone: "Pas de réponse TLS", certChecking: "Vérification…",
+        certBy: (i) => `Émis par ${i}`, certUntil: (w) => `Valable jusqu’au ${w}` },
       db: { title: "Bases de données", backups: "Sauvegardes", none: "Aucune base de données dans Dokploy.", noBackup: "Aucune sauvegarde planifiée : ajoutez-en une dans Dokploy (il faut une destination).",
         cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active", ""],
         keep: (n) => (n ? `${n} dernières` : "toutes"), never: "jamais exécutée", run: "Sauvegarder maintenant", runQ: (n) => `Sauvegarder ${n} maintenant ?`,
@@ -1102,6 +1106,36 @@ export function mount(el, ctx) {
   }
 
   // ---- Domains
+  // Certificates as visitors see them, checked once per load when the Domains tab opens (TLS handshakes server-side).
+  let certs = null;  // null: not asked yet; a promise while asked; then {host: result}
+  const certCells = new Map();
+  function certCell(x, label) {
+    const cell = td(label, x.https ? h("span", { class: "ui-muted ui-small" }, d.dom.certChecking) : "–");
+    if (x.https) certCells.set(x.host, [...(certCells.get(x.host) || []), cell]);
+    return cell;
+  }
+  function paintCerts() {
+    if (!certs || certs instanceof Promise) return;
+    for (const [host, cells] of certCells) {
+      const r = certs[host];
+      for (const cell of cells) {
+        if (!r) { cell.replaceChildren("–"); continue; }
+        const days = r.days_left;
+        const cls = !r.valid || days == null || days <= 7 ? "ui-error" : days <= 21 ? "ui-warning" : "ui-success";
+        const text = r.error && !r.not_after ? d.dom.certNone : !r.valid ? d.dom.certBad : d.dom.certDays(days);
+        const tip = [r.issuer ? d.dom.certBy(r.issuer) : null, r.not_after ? d.dom.certUntil(full(r.not_after)) : null, r.error].filter(Boolean).join("\n");
+        cell.replaceChildren(h("span", { class: `ui-badge ${cls}`, title: tip || null }, icon(r.valid ? "lock" : "triangle-alert"), " ", text));
+      }
+    }
+  }
+  function readCerts() {
+    if (certs) { paintCerts(); return; }
+    certs = ctx.api("certificates").then((r) => {
+      certs = Object.fromEntries((r.certificates || []).map((x) => [x.host, x]));
+      if (alive) paintCerts();
+    }).catch(() => { certs = {}; if (alive) paintCerts(); });
+  }
+
   function domains() {
     if (!dash?.domains) return card(null, null, missing());
     if (!dash.domains.length) return empty(d.dom.none, "globe");
@@ -1116,13 +1150,14 @@ export function mount(el, ctx) {
       td(c[1], x.service || "–"),
       td(c[2], `${x.project || "–"}${x.environment ? ` / ${x.environment}` : ""}`),
       td(c[3], x.https ? h("span", { class: "ui-badge ui-success" }, icon("lock"), " HTTPS") : h("span", { class: "ui-badge ui-warning" }, "HTTP")),
-      td(c[4], x.cert && x.cert !== "none" ? x.cert : "–"),
+      certCell(x, c[4]),
       td(c[5], h("span", { class: "ui-badge ui-outline", title: x.routed ? t.routedHelp : null }, x.routed ? d.dom.labels : d.dom.dokploy)))]);
     function draw() {
       const shown = rows.filter(([x]) => !q || [x.host, x.service, x.project].filter(Boolean).join(" ").toLowerCase().includes(q));
       listSlot.replaceChildren(shown.length ? table(c, shown.map(([, tr]) => tr)) : empty(d.noMatch));
     }
     draw();
+    readCerts();
     return h("div", { class: "ui-stack" }, h("div", { class: "dk-tools" }, search), listSlot);
   }
 
@@ -1333,6 +1368,8 @@ export function mount(el, ctx) {
     const mine = generation;
     healthCache.clear();
     rendered.clear();
+    certs = null;  // Refresh checks the certificates again
+    certCells.clear();
     body.replaceChildren(skeleton());
     try {
       const st = info = await ctx.api("status");

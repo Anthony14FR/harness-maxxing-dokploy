@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.12.0 - 2026-11-10
+
+- **Certificates and their expiry**: Domains → **Certificate** shows the certificate visitors really get for each HTTPS
+  domain: days left (orange under 21, red under 7), its issuer, and **Not trusted** when a browser would refuse it
+  (self-signed, wrong name). It is read by a TLS handshake to Dokploy's server, never from Dokploy's certificate
+  store (which holds private keys). **Alerts** now warn 14 days before an expiry and when a certificate is not trusted.
+
 ## 1.11.0 - 2026-11-10
 
 - **Live CPU and memory**: Server → **Live usage** draws the CPU and memory of all containers and of each service
