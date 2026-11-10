@@ -19,7 +19,7 @@ const T = {
     confirmDeploy: (n) => `Deploy ${n} now?`, confirmRedeploy: (n) => `Rebuild and redeploy ${n} now?`,
     started: (n) => `Deployment of ${n} started.`, noLog: "No deployment yet.",
     upd: {
-      title: "Updates", lead: "This extension, Dokploy and Harness: see what is new, update after you confirm.", check: "Check for updates", checking: "Checking…",
+      title: "Updates", lead: "This extension, Dokploy and Harness: see what is new, update after you confirm.", check: "Check for updates", checkShort: "Check", checking: "Checking…",
       ext: "This extension", dok: "Dokploy", har: "Harness Maxxing",
       upToDate: (v) => `Up to date (${v}).`, available: (a, b) => `${a} → ${b}`,
       update: "Update", harLink: "Open Settings → Updates",
@@ -50,7 +50,7 @@ const T = {
       },
     },
     cols: ["Last deployment", "Containers", "Kind", "Project", "Name", "Domains", ""],
-    health: { ok: "running", partial: "partly down", down: "down", stopped: "stopped", unknown: "unknown" },
+    health: { ok: "Running", partial: "Partly down", down: "Down", stopped: "Stopped", unknown: "Unknown" },
     risk: {
       downtime: "Its containers are stopped and started again: the site can be down for a few seconds.",
       no_rebuild: "It has no git source: nothing is rebuilt, the same image starts again.",
@@ -63,7 +63,7 @@ const T = {
     confirmStop: (n) => `Stop ${n} now?`, confirmStart: (n) => `Start ${n} now?`,
     confirmRollback: (n, d) => `Roll ${n} back to “${d}”?`,
     doneAction: { stop: (n) => `${n} is stopping.`, start: (n) => `${n} is starting.`, rollback: (n) => `Rollback of ${n} started.` },
-    protect: "Protect", unprotect: "Unprotect", protectedBadge: "protected",
+    protect: "Protect", unprotect: "Unprotect", protectedBadge: "Protected",
     protectedHelp: "Protected: read-only here and for sessions. Only you can lift it, on this page.",
     routedHelp: "Routed by this compose's own Traefik labels, not a Dokploy domain",
     d: {
@@ -92,22 +92,22 @@ const T = {
       },
       res: { title: "Server resources", cpu: "CPU", cpus: (n, r) => `${n} cores${r ? ` · ${r} reserved` : ""}`, mem: "Memory", disk: "Disk", of: (a, b) => `${a} of ${b}` },
       recent: "Recent deployments", seeAll: "See all",
-      search: "Search", searchSvc: "Search a service, project or domain", searchDom: "Search a domain or service",
+      search: "Search", searchSvc: "Service, project or domain", searchDom: "Domain or service",
       filter: { all: "All", problems: "Problems", failed: "Failed", running: "In progress" },
       noMatch: "Nothing matches.",
       more: "More", logsOf: (n) => `Logs of ${n}`,
-      dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "disabled", none: "No domain yet." },
+      dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "Disabled", none: "No domain yet." },
       db: { title: "Databases", backups: "Backups", none: "No database in Dokploy.", noBackup: "No backup scheduled: add one in Dokploy (a destination is needed).",
         cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active"],
         keep: (n) => (n ? `${n} latest` : "all"), never: "never run" },
-      dep: { cols: ["Status", "Service", "Deployment", "When", "Duration", ""], log: "Log", none: "No deployment yet.", backup: "backup", schedule: "scheduled job",
+      dep: { cols: ["Service", "Status", "Deployment", "When", "Duration", ""], log: "Log", none: "No deployment yet.", backup: "backup", schedule: "scheduled job",
         queue: (n) => `${n} in the queue` },
-      srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `on (${c})`, off: "off",
+      srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `On (${c})`, off: "Off",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommended` : v), docker: "Docker disk usage",
         dcols: ["Type", "Count", "Active", "Size", "Reclaimable"], servers: "Remote servers", noServers: "Only this server.",
-        services: (n) => `${n} swarm services`, checked: (w) => `Checked ${w}`, healthy: "healthy", outdated: "update available", on: "on" },
+        services: (n) => `${n} swarm services`, checked: (w) => `Checked ${w}`, healthy: "Healthy", outdated: "Update available", on: "On" },
       dashFailed: "The dashboard could not be read, only the services are shown:",
-      st: { done: "done", error: "failed", running: "in progress", idle: "idle", queued: "queued", cancelled: "cancelled" },
+      st: { done: "Done", error: "Failed", running: "In progress", idle: "Idle", queued: "Queued", cancelled: "Cancelled" },
       kind: { application: "app", compose: "compose", postgres: "PostgreSQL", mysql: "MySQL", mariadb: "MariaDB", mongo: "MongoDB", redis: "Redis", libsql: "libSQL" },
     },
   },
@@ -130,7 +130,7 @@ const T = {
     confirmDeploy: (n) => `Déployer ${n} maintenant ?`, confirmRedeploy: (n) => `Reconstruire et redéployer ${n} maintenant ?`,
     started: (n) => `Déploiement de ${n} lancé.`, noLog: "Aucun déploiement pour l’instant.",
     upd: {
-      title: "Mises à jour", lead: "Cette extension, Dokploy et Harness : voyez les nouveautés, mettez à jour après confirmation.", check: "Vérifier les mises à jour", checking: "Vérification…",
+      title: "Mises à jour", lead: "Cette extension, Dokploy et Harness : voyez les nouveautés, mettez à jour après confirmation.", check: "Vérifier les mises à jour", checkShort: "Vérifier", checking: "Vérification…",
       ext: "Cette extension", dok: "Dokploy", har: "Harness Maxxing",
       upToDate: (v) => `À jour (${v}).`, available: (a, b) => `${a} → ${b}`,
       update: "Mettre à jour", harLink: "Ouvrir Réglages → Mises à jour",
@@ -161,7 +161,7 @@ const T = {
       },
     },
     cols: ["Dernier déploiement", "Conteneurs", "Type", "Projet", "Nom", "Domaines", ""],
-    health: { ok: "en marche", partial: "en partie arrêté", down: "en panne", stopped: "arrêté", unknown: "inconnu" },
+    health: { ok: "En marche", partial: "En partie arrêté", down: "En panne", stopped: "Arrêté", unknown: "Inconnu" },
     risk: {
       downtime: "Ses conteneurs sont arrêtés puis relancés : le site peut être coupé quelques secondes.",
       no_rebuild: "Il n’a pas de source git : rien n’est reconstruit, la même image redémarre.",
@@ -174,11 +174,11 @@ const T = {
     confirmStop: (n) => `Arrêter ${n} maintenant ?`, confirmStart: (n) => `Démarrer ${n} maintenant ?`,
     confirmRollback: (n, d) => `Revenir pour ${n} au déploiement « ${d} » ?`,
     doneAction: { stop: (n) => `${n} s’arrête.`, start: (n) => `${n} démarre.`, rollback: (n) => `Retour arrière de ${n} lancé.` },
-    protect: "Protéger", unprotect: "Ne plus protéger", protectedBadge: "protégé",
+    protect: "Protéger", unprotect: "Ne plus protéger", protectedBadge: "Protégé",
     protectedHelp: "Protégé : en lecture seule ici et pour les sessions. Vous seul pouvez lever la protection, sur cette page.",
     routedHelp: "Routé par les labels Traefik de ce compose, pas par un domaine Dokploy",
     d: {
-      tabs: { overview: "Vue d’ensemble", services: "Services", domains: "Domaines", databases: "Bases", deployments: "Déploiements", server: "Serveur" },
+      tabs: { overview: "Aperçu", services: "Services", domains: "Domaines", databases: "Bases", deployments: "Déploiements", server: "Serveur" },
       tabsLabel: "Sections Dokploy",
       subtitle: (url) => `Connecté à ${url}`,
       unavailable: "Indisponible sur cette version de Dokploy.",
@@ -203,22 +203,22 @@ const T = {
       },
       res: { title: "Ressources du serveur", cpu: "Processeur", cpus: (n, r) => `${n} cœurs${r ? ` · ${r} réservés` : ""}`, mem: "Mémoire", disk: "Disque", of: (a, b) => `${a} sur ${b}` },
       recent: "Derniers déploiements", seeAll: "Tout voir",
-      search: "Rechercher", searchSvc: "Rechercher un service, un projet ou un domaine", searchDom: "Rechercher un domaine ou un service",
+      search: "Rechercher", searchSvc: "Service, projet ou domaine", searchDom: "Domaine ou service",
       filter: { all: "Tous", problems: "Problèmes", failed: "En échec", running: "En cours" },
       noMatch: "Aucun résultat.",
       more: "Plus", logsOf: (n) => `Logs de ${n}`,
-      dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "désactivé", none: "Aucun domaine pour l’instant." },
+      dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "Désactivé", none: "Aucun domaine pour l’instant." },
       db: { title: "Bases de données", backups: "Sauvegardes", none: "Aucune base de données dans Dokploy.", noBackup: "Aucune sauvegarde planifiée : ajoutez-en une dans Dokploy (il faut une destination).",
         cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active"],
         keep: (n) => (n ? `${n} dernières` : "toutes"), never: "jamais exécutée" },
-      dep: { cols: ["Statut", "Service", "Déploiement", "Quand", "Durée", ""], log: "Log", none: "Aucun déploiement pour l’instant.", backup: "sauvegarde", schedule: "tâche planifiée",
+      dep: { cols: ["Service", "Statut", "Déploiement", "Quand", "Durée", ""], log: "Log", none: "Aucun déploiement pour l’instant.", backup: "sauvegarde", schedule: "tâche planifiée",
         queue: (n) => `${n} en attente` },
-      srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `activé (${c})`, off: "désactivé",
+      srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `Activé (${c})`, off: "Désactivé",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommandée` : v), docker: "Espace disque Docker",
         dcols: ["Type", "Nombre", "Actifs", "Taille", "Récupérable"], servers: "Serveurs distants", noServers: "Uniquement ce serveur.",
-        services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "sain", outdated: "mise à jour disponible", on: "activée" },
+        services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "Sain", outdated: "Mise à jour disponible", on: "Activée" },
       dashFailed: "Le tableau de bord n’a pas pu être lu, seuls les services sont affichés :",
-      st: { done: "réussi", error: "en échec", running: "en cours", idle: "inactif", queued: "en attente", cancelled: "annulé" },
+      st: { done: "Réussi", error: "En échec", running: "En cours", idle: "Inactif", queued: "En attente", cancelled: "Annulé" },
       kind: { application: "app", compose: "compose", postgres: "PostgreSQL", mysql: "MySQL", mariadb: "MariaDB", mongo: "MongoDB", redis: "Redis", libsql: "libSQL" },
     },
   },
@@ -240,21 +240,23 @@ const CSS = `
 .dk .dk-head-text p{margin:2px 0 0}
 .dk .dk-tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);overflow-x:auto;scrollbar-width:none;margin-top:4px}
 .dk .dk-tabs::-webkit-scrollbar{display:none}
-.dk .dk-tab{display:inline-flex;align-items:center;gap:8px;padding:10px 12px;min-height:40px;border:0;background:none;color:var(--muted-foreground);
+.dk .dk-tab{flex:none;display:inline-flex;align-items:center;gap:8px;padding:10px 12px;min-height:40px;border:0;background:none;color:var(--muted-foreground);
   font:inherit;font-size:14px;font-weight:500;white-space:nowrap;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:6px 6px 0 0}
 .dk .dk-tab:hover{color:var(--foreground)}
 .dk .dk-tab[aria-selected="true"]{color:var(--foreground);border-bottom-color:var(--primary)}
 .dk .dk-tab:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .dk .dk-tab svg,.dk .dk-ico svg{width:16px;height:16px;flex:none}
 .dk .dk-count{font-size:12px;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
-.dk .dk-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.dk .dk-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(130px,100%),1fr));gap:12px}
 .dk .dk-stat{display:flex;flex-direction:column;gap:4px;padding:14px 16px}
 .dk .dk-go{font:inherit;color:inherit;text-align:left;cursor:pointer;transition:border-color .15s}
 .dk .dk-go:hover{border-color:color-mix(in oklab,var(--primary) 45%,var(--border))}
 .dk .dk-go:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
-.dk .dk-stat-top{display:flex;align-items:center;gap:8px;color:var(--muted-foreground);font-size:13px}
+.dk .dk-stat-top{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 8px;color:var(--muted-foreground);font-size:13px;line-height:1.3;min-width:0}
+.dk .dk-stat-top svg{margin-top:1px}
 .dk .dk-stat-value{font-size:26px;font-weight:600;line-height:1.1;font-variant-numeric:tabular-nums}
-.dk .dk-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;align-items:start}
+.dk .dk-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:12px;align-items:start}
+.dk .dk-cols>*{min-width:0}
 .dk .dk-meter{display:grid;gap:6px}
 .dk .dk-meter-row{display:flex;align-items:baseline;gap:8px;font-size:14px}
 .dk .dk-meter-row b{font-weight:500}
@@ -289,6 +291,7 @@ const CSS = `
 .dk .dk-menu .ui-btn{justify-content:flex-start;width:100%}
 .dk .dk-upd{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .dk .dk-upd .dk-grow{flex:1 1 260px}
+.dk .dk-short{display:none}
 @media (max-width:720px){.dk .dk-upd .dk-grow{order:3;flex-basis:100%}.dk .dk-upd>.ui-btn{order:4}.dk .dk-stat-value{font-size:22px}}
 .dk .ui-table td{vertical-align:middle}
 .dk .ui-num{white-space:nowrap}
@@ -296,14 +299,30 @@ const CSS = `
   .dk .dk-rt thead{display:none}
   .dk .dk-rt,.dk .dk-rt tbody,.dk .dk-rt tr,.dk .dk-rt td{display:block;width:100%}
   .dk .dk-rt tr{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px}
-  .dk .dk-rt td{border:0;padding:4px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .dk .dk-rt td{border:0;padding:4px 0;display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere;min-width:0}
+  .dk .dk-rt td>*{min-width:0}
+  .dk .dk-rt .dk-actions{width:100%}
+  .dk .dk-rt .dk-actions>*{flex:1 1 84px;justify-content:center}
+  .dk .dk-rt .dk-actions>details>summary{width:100%;justify-content:center}
+  .dk .dk-list li{flex-wrap:wrap}
+  .dk .dk-list li>time{margin-left:auto}
+  .dk .dk-tools .ui-input{min-width:0;flex-basis:100%}
   .dk .dk-rt td[data-label]::before{content:attr(data-label);color:var(--muted-foreground);font-size:12px;min-width:96px}
   .dk .dk-rt td.dk-name{font-size:15px}
   .dk .ui-table-wrap{overflow:visible}
   .dk .dk-kv{grid-template-columns:1fr}
   .dk .dk-kv dd{margin-bottom:6px}
 }
-@media (pointer:coarse){.dk .ui-btn,.dk .dk-chip,.dk .dk-tab{min-height:44px}}
+@media (pointer:coarse){.dk .dk-rt a.ui-link,.dk .dk-list a.ui-link{display:inline-flex;align-items:center;min-height:44px}.dk .ui-btn,.dk .dk-chip,.dk .dk-tab,.dk summary.ui-btn{min-height:44px}.dk .dk-tab{min-width:44px;justify-content:center}}
+@media (max-width:520px){
+  .dk .dk-tabs{gap:0}
+  .dk .dk-tab{padding:10px 8px}
+  .dk .dk-tab[aria-selected="false"] .dk-tab-label,.dk .dk-tab[aria-selected="false"] .dk-count{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  .dk .dk-head .ui-row{width:100%;justify-content:flex-end}
+  .dk .dk-chips{width:100%}.dk .dk-chip{flex:1}
+  .dk .dk-upd .dk-grow{display:none}.dk .dk-upd>.ui-btn{order:0;margin-left:auto}
+  .dk .dk-upd .dk-long{display:none}.dk .dk-upd .dk-short{display:inline}
+}
 @media (prefers-reduced-motion:no-preference){.dk .dk-bar>span{transition:width .4s ease}}
 `;
 
@@ -478,7 +497,9 @@ export function mount(el, ctx) {
     const u = t.upd;
     const out = h("div", { class: "ui-stack", hidden: true });
     const slot = h("div");
-    const b = btn(u.check, "refresh-cw", check);
+    const label = (long, short) => [h("span", { class: "dk-long" }, long), h("span", { class: "dk-short", "aria-hidden": "true" }, short)];
+    const b = h("button", { class: "ui-btn ui-outline ui-sm", type: "button", onclick: check, "aria-label": u.check }, icon("refresh-cw"), label(u.check, u.checkShort));
+    const setLabel = (long, short) => b.replaceChildren(icon("refresh-cw"), label(long, short));
     const line = h("span", { class: "ui-muted ui-small dk-grow" }, u.lead);
     updates.replaceChildren(h("div", { class: "dk-upd" },
       h("span", { class: "ui-icon-box ui-neutral" }, icon("download")),
@@ -493,7 +514,7 @@ export function mount(el, ctx) {
     };
     async function check() {
       b.disabled = true;
-      b.lastChild.textContent = u.checking;
+      setLabel(u.checking, u.checking);
       b.setAttribute("aria-busy", "true");
       try {
         const r = await ctx.api("updates");
@@ -521,7 +542,7 @@ export function mount(el, ctx) {
       } catch (err) { fail(err); }
       b.disabled = false;
       b.removeAttribute("aria-busy");
-      b.lastChild.textContent = u.check;
+      setLabel(u.check, u.checkShort);
     }
   }
 
@@ -552,7 +573,7 @@ export function mount(el, ctx) {
           select(to);
           tabBtns.get(to).focus();
         },
-      }, icon(ic), d.tabs[k], " ", count);
+      }, icon(ic), h("span", { class: "dk-tab-label" }, d.tabs[k]), " ", count);
       b.count = count;
       tabBtns.set(k, b);
       bar.append(b);
@@ -568,6 +589,7 @@ export function mount(el, ctx) {
       b.tabIndex = key === k ? 0 : -1;
     }
     for (const [key, p] of panels) p.hidden = key !== k;
+    tabBtns.get(k)?.scrollIntoView({ block: "nearest", inline: "nearest" });  // a phone shows the chosen tab whole
     render(k);
   }
 
@@ -827,7 +849,7 @@ export function mount(el, ctx) {
     const backups = !dash?.backups ? missing() : !dash.backups.length ? h("p", { class: "ui-muted" }, d.db.noBackup) : table(bc, dash.backups.map((b) => h("tr", {},
       td(null, h("b", {}, b.service || b.name || b.app_name || "–")),
       td(bc[1], b.database || "–"),
-      td(bc[2], b.schedule ? h("code", { class: "ui-code", style: "padding:1px 6px" }, b.schedule) : "–"),
+      td(bc[2], b.schedule ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, b.schedule) : "–"),
       td(bc[3], d.db.keep(b.keep)),
       td(bc[4], b.last_run ? [status(b.last_run.status), " ", h("time", { class: "ui-muted ui-small", title: full(b.last_run.at) }, ago(b.last_run.at))] : h("span", { class: "ui-muted" }, d.db.never)),
       td(bc[5], b.enabled === false ? h("span", { class: "ui-badge ui-outline" }, d.srv.off) : h("span", { class: "ui-badge ui-success" }, icon("check"), " ", d.srv.on)))));
@@ -847,8 +869,8 @@ export function mount(el, ctx) {
     function draw() {
       const shown = dash.deployments.filter((x) => only === "all" || x.status === only);
       listSlot.replaceChildren(shown.length ? table(c, shown.map((x) => h("tr", {},
-        td(c[0], status(x.status)),
         td(null, h("span", {}, h("b", {}, x.service || d.dep[x.kind] || "–"), x.project ? h("span", { class: "dk-sub" }, x.project) : null)),
+        td(c[1], status(x.status)),
         td(c[2], h("span", { style: "min-width:0" }, x.title || "–", x.error ? h("span", { class: "dk-sub", style: "color:var(--destructive)" }, x.error) : null)),
         td(c[3], h("time", { datetime: x.created || "", title: full(x.created) }, ago(x.created))),
         td(c[4], h("span", { class: "ui-num" }, dur(x.started || x.created, x.finished))),
@@ -879,7 +901,7 @@ export function mount(el, ctx) {
       [d.srv.postgres, infra ? okBadge(infra.postgres) : "–"],
       [d.srv.traefik, tr ? h("span", {}, okBadge(tr.state), " ", h("span", { class: "ui-muted" }, d.srv.traefikVer(tr.version || "?", tr.recommended)),
         tr.version_status === "outdated" ? [" ", h("span", { class: "ui-badge ui-warning" }, d.srv.outdated)] : null) : infra ? okBadge(infra.traefik) : "–"],
-      [d.srv.ip, dash?.ip ? h("code", { class: "ui-code", style: "padding:1px 6px" }, dash.ip) : "–"],
+      [d.srv.ip, dash?.ip ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, dash.ip) : "–"],
       [d.srv.cleanup, dash?.log_cleanup ? (dash.log_cleanup.enabled ? d.srv.cleanupOn(dash.log_cleanup.cron || "") : d.srv.off) : "–"],
     ]));
     const dc = d.srv.dcols;
