@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.13.1 - 2026-11-10
+
+- **Fix**: after **Check for updates**, the button could read `[object HTMLSpanElement],[object HTMLSpanElement]`, and an
+  empty part of a card could show `null`. Every part of the page is now drawn the same safe way.
+
 ## 1.13.0 - 2026-11-10
 
 - **Preview deployments**: Deployments → **Preview deployments** lists, for each app with Dokploy's preview deployments
