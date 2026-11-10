@@ -101,9 +101,15 @@ def handle(ctx, method, path, query, body):
                 dok = core.dokploy_check(core.client(state, secret, timeout=4))
             except core.DokployError as e:
                 dok = {"error": e.code, "message": e.message}
-            budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s minus Dokploy's share
+            try:
+                trf = core.traefik_check(core.client(state, secret, timeout=4))
+            except core.DokployError as e:
+                trf = {"error_code": e.code, "message": e.message}
+            budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s in all, minus Dokploy and Traefik reads
             ext = core.ext_check(core.EXT_DIR, _supported_api(), budget=min(core.CHECK_BUDGET, budget))
-            return {"extension": ext, "dokploy": dok, "harness": "/settings/updates"}
+            return {"extension": ext, "dokploy": dok, "traefik": trf, "harness": "/settings/updates"}
+        if path == "traefik" and method == "GET":  # the page follows a Traefik update with it
+            return core.traefik_check(core.client(state, secret, timeout=6))
         if path == "update" and method == "POST":  # after the user confirmed exactly this version
             what, to = body.get("what"), str(body.get("to") or "")
             if what == "extension":
@@ -117,7 +123,10 @@ def handle(ctx, method, path, query, body):
             if what == "dokploy":
                 chk = core.dokploy_update(core.client(state, secret, timeout=8), to, state)
                 return {"updated": "dokploy", "version": chk["latest"]}
-            return 400, {"error": "bad_target", "message": "what must be extension or dokploy"}
+            if what == "traefik":
+                chk = core.traefik_update(core.client(state, secret, timeout=20), to)
+                return {"updated": "traefik", "version": chk["recommended"]}
+            return 400, {"error": "bad_target", "message": "what must be extension, dokploy or traefik"}
         if path == "dashboard" and method == "GET":  # short timeout: 14 reads must fit in Harness's 30 s
             return core.dashboard(core.client(state, secret, timeout=8))
         c = core.client(state, secret)

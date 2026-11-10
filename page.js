@@ -28,6 +28,12 @@ const T = {
       confirmDok: (a, b) => `Update Dokploy from ${a} to ${b}?`,
       doneExt: (v) => `Extension updated to ${v}: the page reloads.`,
       doneDok: (v) => `Dokploy is updating to ${v}: its own page is back in about 2 minutes.`,
+      trf: "Traefik", confirmTrf: (a, b) => `Update Traefik from ${a} to ${b}?`, updateTrf: "Update Traefik",
+      trfRunning: (v) => `Updating Traefik to ${v}…`, trfDone: (v) => `Traefik is on ${v}: your sites are served by it again.`,
+      trfFailed: (e) => `The Traefik update failed, Dokploy kept the previous version: ${e}`,
+      trfSlow: "Traefik is not on the new version yet: check it in Dokploy (Traefik, View Logs).",
+      trfLastError: (e) => `Last update failed: ${e}`, trfStopped: "Traefik is not running: start it in Dokploy (Reload), then update it.",
+      trfUnknown: "This Dokploy does not report its Traefik version.",
       state: {
         not_git: "Installed without git: update it the way it was installed.",
         unreachable: "The extension's repository cannot be reached right now.",
@@ -57,6 +63,7 @@ const T = {
       unknown: "Dokploy did not give its details: assume the site can go down.",
       stopped: "The site stays down until you start it again.",
       dokploy_away: "Your sites stay up: Traefik and the apps keep running. Dokploy's own page and API are away for about 2 minutes.",
+      traefik_restart: "Dokploy recreates Traefik, which serves all your sites: they can be unreachable for a few seconds. Its environment and ports are kept; if the update fails, Dokploy keeps the previous version.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
@@ -81,6 +88,7 @@ const T = {
         mem: (p) => `Memory ${p}% used.`,
         http: (n) => `${n} domain${n > 1 ? "s" : ""} served without HTTPS.`,
         queue: (n) => `${n} deployment${n > 1 ? "s" : ""} waiting in the queue.`,
+        trf: (e) => `Traefik: its last update failed (${e}).`,
       },
       stat: { services: "Services", projects: "Projects", domains: "Domains", deploys: "Deployments (24 h)", containers: "Containers" },
       statSub: {
@@ -139,6 +147,12 @@ const T = {
       confirmDok: (a, b) => `Mettre à jour Dokploy de ${a} vers ${b} ?`,
       doneExt: (v) => `Extension mise à jour en ${v} : la page se recharge.`,
       doneDok: (v) => `Dokploy passe en ${v} : sa propre page revient dans 2 minutes environ.`,
+      trf: "Traefik", confirmTrf: (a, b) => `Mettre à jour Traefik de ${a} vers ${b} ?`, updateTrf: "Mettre à jour Traefik",
+      trfRunning: (v) => `Mise à jour de Traefik vers ${v}…`, trfDone: (v) => `Traefik est en ${v} : il sert de nouveau vos sites.`,
+      trfFailed: (e) => `La mise à jour de Traefik a échoué, Dokploy a gardé l’ancienne version : ${e}`,
+      trfSlow: "Traefik n’est pas encore sur la nouvelle version : vérifiez dans Dokploy (Traefik, View Logs).",
+      trfLastError: (e) => `Dernière mise à jour échouée : ${e}`, trfStopped: "Traefik ne tourne pas : démarrez-le dans Dokploy (Reload), puis mettez-le à jour.",
+      trfUnknown: "Cette version de Dokploy n’indique pas la version de Traefik.",
       state: {
         not_git: "Installée sans git : mettez-la à jour comme vous l’avez installée.",
         unreachable: "Le dépôt de l’extension est injoignable pour le moment.",
@@ -168,6 +182,7 @@ const T = {
       unknown: "Dokploy n’a pas donné ses détails : considérez que le site peut être coupé.",
       stopped: "Le site reste coupé jusqu’à ce que vous le redémarriez.",
       dokploy_away: "Vos sites restent en ligne : Traefik et les apps continuent de tourner. La page et l’API de Dokploy sont absentes 2 minutes environ.",
+      traefik_restart: "Dokploy recrée Traefik, qui sert tous vos sites : ils peuvent être injoignables quelques secondes. Ses variables d’environnement et ses ports sont gardés ; si la mise à jour échoue, Dokploy garde l’ancienne version.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
@@ -192,6 +207,7 @@ const T = {
         mem: (p) => `Mémoire utilisée à ${p} %.`,
         http: (n) => `${n} domaine${n > 1 ? "s" : ""} servi${n > 1 ? "s" : ""} sans HTTPS.`,
         queue: (n) => `${n} déploiement${n > 1 ? "s" : ""} en attente.`,
+        trf: (e) => `Traefik : sa dernière mise à jour a échoué (${e}).`,
       },
       stat: { services: "Services", projects: "Projets", domains: "Domaines", deploys: "Déploiements (24 h)", containers: "Conteneurs" },
       statSub: {
@@ -507,7 +523,7 @@ export function mount(el, ctx) {
 
   // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
   function confirmPanel(svc, question, run, close, risks = svc.risks || ["unknown"]) {
-    const typed = ["downtime", "unknown", "stopped", "dokploy_away"].some((r) => risks.includes(r));
+    const typed = ["downtime", "unknown", "stopped", "dokploy_away", "traefik_restart"].some((r) => risks.includes(r));
     const name = String(svc.name).trim();
     const input = typed ? h("input", { class: "ui-input", placeholder: t.typeName(name), "aria-label": t.typeName(name) }) : null;
     const ok = h("button", { class: "ui-btn ui-danger ui-sm", type: "button", disabled: typed }, t.confirm);
@@ -543,6 +559,41 @@ export function mount(el, ctx) {
       } catch (e) { fail(e); b.disabled = false; }
     } }, t.skillButton);
     skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), ["missing", "copied"].includes(state) ? b : null);
+  }
+
+  // Traefik: Dokploy recreates it in the background on the version it recommends; tr is the traefik route's answer.
+  function traefikRow(tr, slot, onDone) {
+    const u = t.upd;
+    if (!tr || tr.error_code) return h("span", { class: "ui-muted" }, tr?.message || u.trfUnknown);
+    const parts = [];
+    if (tr.updating) parts.push(h("span", {}, u.trfRunning(tr.recommended || "?")));
+    else if (tr.state !== "running") parts.push(h("span", { class: "ui-muted" }, u.trfStopped));
+    else if (tr.version_status === "outdated") {
+      parts.push(h("span", {}, u.available(tr.version || "?", tr.recommended || "?")), h("div", {}, btn(u.updateTrf, "download",
+        () => slot.replaceChildren(confirmPanel({ name: "traefik" }, u.confirmTrf(tr.version || "?", tr.recommended),
+          () => updateTraefik(tr.recommended, onDone), () => slot.replaceChildren(), ["traefik_restart"])), "ui-btn ui-sm")));
+    } else parts.push(h("span", { class: "ui-muted" }, u.upToDate(tr.version || "?")));
+    if (tr.error && !tr.updating) parts.push(h("span", { class: "ui-small", style: "color:var(--destructive)" }, u.trfLastError(tr.error)));
+    return parts;
+  }
+
+  // Follows the update as Dokploy's own page does: done once Traefik runs the new version and stays up two reads in a row.
+  async function updateTraefik(to, onDone) {
+    const u = t.upd;
+    try { await ctx.api("update", { method: "POST", body: { what: "traefik", to } }); } catch (e) { fail(e); return; }
+    say(u.trfRunning(to), "ui-info");
+    let stable = null;
+    for (let i = 0; i < 60 && alive; i += 1) {  // up to 3 minutes, every 3 s
+      await new Promise((r) => setTimeout(r, 3000));
+      let s;
+      try { s = await ctx.api("traefik"); } catch { continue; }  // Dokploy may answer slowly while Traefik is swapped
+      if (!alive) return;
+      if (s.error && !s.updating) { say(u.trfFailed(s.error), "ui-error"); onDone?.(); return; }
+      const up = !s.updating && s.state === "running" && s.version_status !== "outdated";
+      if (up && stable === s.started) { say(u.trfDone(s.version || to), "ui-success"); onDone?.(); return; }
+      stable = up ? s.started : null;
+    }
+    if (alive) { say(u.trfSlow, "ui-warning"); onDone?.(); }
   }
 
   // Updates, on top: a check changes nothing; each update runs only the exact version the user confirmed.
@@ -591,6 +642,7 @@ export function mount(el, ctx) {
             run("dokploy", dk.latest, u.doneDok), () => slot.replaceChildren(), ["dokploy_away"])), "ui-btn ui-sm"))];
         out.hidden = false;
         out.replaceChildren(h("div", { class: "dk-cols" }, row(u.ext, ext), row(u.dok, dok),
+          row(u.trf, traefikRow(r.traefik, slot, () => { load(); check(); })),
           row(u.har, h("div", {}, btn(u.harLink, "settings", () => ctx.navigate(r.harness), "ui-btn ui-ghost ui-sm")))));
       } catch (err) { fail(err); }
       b.disabled = false;
@@ -678,6 +730,7 @@ export function mount(el, ctx) {
     const http = (dash?.domains || []).filter((x) => !x.https && x.enabled !== false).length;
     if (http) out.push(d.issue.http(http));
     if (dash?.queue) out.push(d.issue.queue(dash.queue));
+    if (dash?.traefik?.error && !dash.traefik.updating) out.push(d.issue.trf(dash.traefik.error));
     return out;
   }
 
@@ -950,13 +1003,15 @@ export function mount(el, ctx) {
       [r.services ? d.srv.services(r.services) : null, r.checked ? d.srv.checked(ago(r.checked)) : null].some(Boolean)
         ? h("p", { class: "ui-muted ui-small" }, [r.services ? d.srv.services(r.services) : null, r.checked ? d.srv.checked(ago(r.checked)) : null].filter(Boolean).join(" · "))
         : null) : card(d.res.title, "gauge", missing());
+    const trfSlot = h("div");  // the Traefik update's confirmation opens here
     const inf = card(d.srv.infra, "shield", kv([
       [d.srv.postgres, infra ? okBadge(infra.postgres) : "–"],
       [d.srv.traefik, tr ? h("span", {}, okBadge(tr.state), " ", h("span", { class: "ui-muted" }, d.srv.traefikVer(tr.version || "?", tr.recommended)),
         tr.version_status === "outdated" ? [" ", h("span", { class: "ui-badge ui-warning" }, d.srv.outdated)] : null) : infra ? okBadge(infra.traefik) : "–"],
+      tr && (tr.version_status === "outdated" || tr.error || tr.updating) ? ["", h("div", { class: "ui-stack", style: "gap:6px" }, traefikRow(tr, trfSlot, load))] : null,
       [d.srv.ip, dash?.ip ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, dash.ip) : "–"],
       [d.srv.cleanup, dash?.log_cleanup ? (dash.log_cleanup.enabled ? d.srv.cleanupOn(dash.log_cleanup.cron || "") : d.srv.off) : "–"],
-    ]));
+    ]), trfSlot);
     const dc = d.srv.dcols;
     const docker = card(d.srv.docker, "hard-drive", !dash?.disk_usage ? missing() : table(dc, dash.disk_usage.map((x) => h("tr", {},
       td(null, x.type || "–"), td(dc[1], h("span", { class: "ui-num" }, String(x.total ?? "–"))),

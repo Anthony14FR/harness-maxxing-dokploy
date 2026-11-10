@@ -226,6 +226,7 @@ DASH = {
         },
     ],
     "deployment.queueList": [{"id": "q1"}],
+    "settings.updateTraefik": True,
     "docker.getContainers": [
         {
             "containerId": "2",

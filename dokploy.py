@@ -180,6 +180,10 @@ def run(a: argparse.Namespace) -> int:
             res["dokploy"] = core.dokploy_check(core.client(st, secret))
         except core.DokployError as e:
             res["dokploy"] = {"error": e.code, "message": e.message}
+        try:
+            res["traefik"] = core.traefik_check(core.client(st, secret))
+        except core.DokployError as e:
+            res["traefik"] = {"error_code": e.code, "message": e.message}
         if a.json:
             print(json.dumps(res, indent=2))
             return 0
@@ -189,6 +193,12 @@ def run(a: argparse.Namespace) -> int:
         print(
             f"dokploy    {d.get('current') or '-'} -> {d.get('latest') or '-'}  "
             f"{d.get('message') or ('available' if d.get('available') else 'up_to_date')}"
+        )
+        tr = res["traefik"]
+        print(
+            f"traefik    {tr.get('version') or '-'} -> {tr.get('recommended') or '-'}  "
+            f"{tr.get('message') or ('available' if tr.get('available') else tr.get('version_status') or '-')}"
+            + (f"  (last update failed: {tr['error']})" if tr.get("error") else "")
         )
         print("updates are the user's: they run them on the Dokploy page in Harness (which also checks the")
         print("extension contract of this Harness)")

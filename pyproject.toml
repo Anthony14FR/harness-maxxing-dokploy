@@ -1,6 +1,6 @@
 [project]
 name = "harness-maxxing-dokploy"
-version = "1.4.2"
+version = "1.5.0"
 description = "Dokploy page extension and skill for Harness Maxxing"
 requires-python = ">=3.11"
 license = "MIT"
