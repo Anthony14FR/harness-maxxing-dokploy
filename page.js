@@ -413,6 +413,11 @@ function h(tag, attrs = {}, ...children) {
   return e;
 }
 
+// replaceChildren with what h() accepts: nested lists flattened, null and false skipped (it would print them as text).
+function fill(el, ...kids) {
+  el.replaceChildren(...kids.flat(Infinity).filter((k) => k != null && k !== false));
+}
+
 // **bold**, `code` and [text](https://…) of a changelog line, as nodes; any other link target stays plain text.
 function inline(text) {
   const out = [];
@@ -507,7 +512,7 @@ export function mount(el, ctx) {
   const subtitle = h("p", { class: "ui-muted ui-small" }, t.intro);
   const updates = h("section", { class: "ui-card ui-stack", "aria-labelledby": "dk-upd-title" });
   const body = h("div", { class: "ui-stack" });
-  el.replaceChildren(style, h("div", { class: "ui-page dk ui-stack", style: "max-width:1200px" },
+  fill(el, style, h("div", { class: "ui-page dk ui-stack", style: "max-width:1200px" },
     h("header", { class: "dk-head" },
       h("span", { class: "ui-icon-box ui-lg" }, icon("rocket")),
       h("div", { class: "dk-head-text" }, h("h1", { class: "ui-h1" }, t.title), subtitle),
@@ -597,7 +602,7 @@ export function mount(el, ctx) {
         const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
         pre.textContent = r.log || L.empty;
         if (r.containers?.length && !pick.options.length) {
-          pick.replaceChildren(...r.containers.map((b) => h("option", { value: b.id }, `${b.name} (${t.health[b.state === "running" ? "ok" : "down"] || b.state})`)));
+          fill(pick, ...r.containers.map((b) => h("option", { value: b.id }, `${b.name} (${t.health[b.state === "running" ? "ok" : "down"] || b.state})`)));
           pick.hidden = false;
         }
         if (r.container) pick.value = r.container;
@@ -655,7 +660,7 @@ export function mount(el, ctx) {
         say(t.skillDone, "ui-success");
       } catch (e) { fail(e); b.disabled = false; }
     } }, t.skillButton);
-    skillBar.replaceChildren(h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), ["missing", "copied"].includes(state) ? b : null);
+    fill(skillBar, h("span", {}, t.skill[state]), h("span", { class: "ui-spacer" }), ["missing", "copied"].includes(state) ? b : null);
   }
 
   // Traefik: Dokploy recreates it in the background on the version it recommends; tr is the traefik route's answer.
@@ -667,7 +672,7 @@ export function mount(el, ctx) {
     else if (tr.state !== "running") parts.push(h("span", { class: "ui-muted" }, u.trfStopped));
     else if (tr.version_status === "outdated") {
       parts.push(h("span", {}, u.available(tr.version || "?", tr.recommended || "?")), h("div", {}, btn(u.updateTrf, "download",
-        () => slot.replaceChildren(confirmPanel({ name: "traefik" }, u.confirmTrf(tr.version || "?", tr.recommended),
+        () => fill(slot, confirmPanel({ name: "traefik" }, u.confirmTrf(tr.version || "?", tr.recommended),
           () => { updateTraefik(tr.recommended, onDone); }, () => slot.replaceChildren(), ["traefik_restart"])), "ui-btn ui-sm")));  // the panel closes at once, the notice follows it
     } else parts.push(h("span", { class: "ui-muted" }, u.upToDate(tr.version || "?")));
     if (tr.error && !tr.updating) parts.push(h("span", { class: "ui-small", style: "color:var(--destructive)" }, u.trfLastError(tr.error)));
@@ -700,9 +705,9 @@ export function mount(el, ctx) {
     const slot = h("div");
     const label = (long, short) => [h("span", { class: "dk-long" }, long), h("span", { class: "dk-short", "aria-hidden": "true" }, short)];
     const b = h("button", { class: "ui-btn ui-outline ui-sm", type: "button", onclick: check, "aria-label": u.check }, icon("refresh-cw"), label(u.check, u.checkShort));
-    const setLabel = (long, short) => { b.replaceChildren(icon("refresh-cw"), label(long, short)); b.setAttribute("aria-label", long); };
+    const setLabel = (long, short) => { fill(b, icon("refresh-cw"), label(long, short)); b.setAttribute("aria-label", long); };
     const line = h("span", { class: "ui-muted ui-small dk-grow" }, u.lead);
-    updates.replaceChildren(h("div", { class: "dk-upd" },
+    fill(updates, h("div", { class: "dk-upd" },
       h("span", { class: "ui-icon-box ui-neutral" }, icon("download")),
       h("h2", { class: "ui-h3", id: "dk-upd-title" }, u.title), line, b), out, slot);
     const row = (label, ...rest) => h("div", { class: "ui-stack", style: "gap:4px" }, h("b", {}, label), ...rest);
@@ -725,7 +730,7 @@ export function mount(el, ctx) {
         if (e.state === "up_to_date") ext = h("span", { class: "ui-muted" }, u.upToDate(e.current));
         else if (e.state === "available") {
           ext = [h("span", {}, u.available(e.current, e.new)), e.changes ? markdown(e.changes) : null,
-            h("div", {}, btn(u.update, "download", () => slot.replaceChildren(confirmPanel({ name: "extension" },
+            h("div", {}, btn(u.update, "download", () => fill(slot, confirmPanel({ name: "extension" },
               u.confirmExt(e.current, e.new), run("extension", e.commit, u.doneExt), () => slot.replaceChildren(), [])), "ui-btn ui-sm"))];
         } else if (e.state === "blocked") {
           ext = [h("span", {}, u.available(e.current, e.new || "?")), h("span", { class: "ui-muted" }, u.blocked),
@@ -735,10 +740,10 @@ export function mount(el, ctx) {
         if (dk.error) dok = h("span", { class: "ui-muted" }, dk.message);
         else if (!dk.available) dok = h("span", { class: "ui-muted" }, u.upToDate(dk.current || "?"));
         else dok = [h("span", {}, u.available(dk.current || "?", dk.latest)), h("div", {}, btn(u.update, "download",
-          () => slot.replaceChildren(confirmPanel({ name: "dokploy" }, u.confirmDok(dk.current || "?", dk.latest),
+          () => fill(slot, confirmPanel({ name: "dokploy" }, u.confirmDok(dk.current || "?", dk.latest),
             run("dokploy", dk.latest, u.doneDok), () => slot.replaceChildren(), ["dokploy_away"])), "ui-btn ui-sm"))];
         out.hidden = false;
-        out.replaceChildren(h("div", { class: "dk-cols" }, row(u.ext, ext), row(u.dok, dok),
+        fill(out, h("div", { class: "dk-cols" }, row(u.ext, ext), row(u.dok, dok),
           row(u.trf, traefikRow(r.traefik, slot, () => { load(); check(); })),
           row(u.har, h("div", {}, btn(u.harLink, "settings", () => ctx.navigate(r.harness), "ui-btn ui-ghost ui-sm")))));
       } catch (err) { fail(err); }
@@ -780,13 +785,13 @@ export function mount(el, ctx) {
     const draw = async () => {
       let job;
       try { job = ((await harness("crons")).jobs || []).find(isMine); } catch (e) {
-        if (alive) body.replaceChildren(h("p", { class: "ui-muted ui-small" }, a.noCrons(e.message)));
+        if (alive) fill(body, h("p", { class: "ui-muted ui-small" }, a.noCrons(e.message)));
         return;
       }
       if (!alive) return;
       const on = !!job?.enabled;
       const last = job?.last_run;
-      body.replaceChildren(h("div", { class: "ui-stack", style: "gap:8px" },  // h() skips a missing last run
+      fill(body, h("div", { class: "ui-stack", style: "gap:8px" },  // h() skips a missing last run
         h("p", {}, h("span", { class: `ui-badge ${on ? "ui-success" : "ui-outline"}` }, on ? a.badgeOn : a.badgeOff), " ", on ? a.on : a.off),
         h("p", { class: "ui-muted ui-small" }, a.how),
         last?.at ? h("p", { class: "ui-muted ui-small" }, a.last(ago(new Date(last.at * 1000).toISOString()), last.ok)) : null,
@@ -852,7 +857,7 @@ export function mount(el, ctx) {
     rendered.add(k);
     const p = panels.get(k);
     const view = { overview, services: servicesView, domains, databases, deployments, server }[k];
-    try { p.replaceChildren(view()); } catch (e) { p.replaceChildren(h("div", { class: "ui-callout ui-error" }, String(e.message || e))); }
+    try { fill(p, view()); } catch (e) { fill(p, h("div", { class: "ui-callout ui-error" }, String(e.message || e))); }
   }
 
   function counts() {
@@ -933,7 +938,7 @@ export function mount(el, ctx) {
     const search = h("input", { class: "ui-input", type: "search", placeholder: d.searchSvc, "aria-label": d.search,
       oninput: () => { q = search.value.trim().toLowerCase(); draw(); } });
     const chips = chipGroup([["all", d.filter.all], ["problems", d.filter.problems]], (v) => { only = v; draw(); });
-    const deploy = (svc, again) => slot.replaceChildren(confirmPanel(svc,
+    const deploy = (svc, again) => fill(slot, confirmPanel(svc,
       (again ? t.confirmRedeploy : t.confirmDeploy)(svc.name),
       async () => {
         try {
@@ -950,13 +955,13 @@ export function mount(el, ctx) {
           setTimeout(() => { if (alive) load(); }, 4000);  // let the containers move before reading them again
         } catch (e) { fail(e); }
       };
-      if (action === "stop") return slot.replaceChildren(confirmPanel(svc, t.confirmStop(svc.name), go, close, ["stopped"]));
-      if (action === "start") return slot.replaceChildren(confirmPanel(svc, t.confirmStart(svc.name), go, close, []));
+      if (action === "stop") return fill(slot, confirmPanel(svc, t.confirmStop(svc.name), go, close, ["stopped"]));
+      if (action === "start") return fill(slot, confirmPanel(svc, t.confirmStart(svc.name), go, close, []));
       try {  // rollback: say which deployment it goes back to before asking
         const r = await ctx.api(`rollback?id=${encodeURIComponent(svc.id)}`);
         deployment = r.deployment;  // the server refuses if the target moved since
         const risks = (svc.risks || ["unknown"]).filter((x) => x !== "no_rebuild");
-        slot.replaceChildren(confirmPanel(svc, t.confirmRollback(svc.name, r.title || r.created || r.deployment), go, close, risks));
+        fill(slot, confirmPanel(svc, t.confirmRollback(svc.name, r.title || r.created || r.deployment), go, close, risks));
       } catch (e) { fail(e); }
     };
     const protect = async (svc, on) => {
@@ -968,9 +973,9 @@ export function mount(el, ctx) {
       healthOf(svc).then((r) => {
         if (!alive) return;
         const boxes = (r.containers || []).filter((b) => b.id && (svc.kind !== "application" || b.state === "running"));  // as the server allows
-        list.replaceChildren(...(boxes.length ? boxes.map((b) => h("li", {},
+        fill(list, ...(boxes.length ? boxes.map((b) => h("li", {},
           h("span", { class: "dk-grow" }, h("b", { class: "dk-trunc", style: "display:block" }, b.name), h("span", { class: "dk-sub" }, b.status || b.state || "")),
-          btn(t.restartOne, "refresh-cw", () => slot.replaceChildren(confirmPanel(svc, t.restartQ(b.name, svc.name), async () => {
+          btn(t.restartOne, "refresh-cw", () => fill(slot, confirmPanel(svc, t.restartQ(b.name, svc.name), async () => {
             try {
               await ctx.api("restart", { method: "POST", body: { id: svc.id, container: b.id } });
               say(t.restarted(b.name), "ui-success");
@@ -978,8 +983,8 @@ export function mount(el, ctx) {
               setTimeout(() => { if (alive) load(); }, 4000);
             } catch (e) { fail(e); }
           }, close, ["downtime"])), "ui-btn ui-outline ui-sm"))) : [h("li", {}, t.health.unknown)]));
-      }).catch((e) => { if (alive) list.replaceChildren(h("li", {}, e.message)); });
-      slot.replaceChildren(h("div", { class: "ui-card ui-stack" },
+      }).catch((e) => { if (alive) fill(list, h("li", {}, e.message)); });
+      fill(slot, h("div", { class: "ui-card ui-stack" },
         h("div", { class: "ui-row" }, h("b", {}, t.restartTitle(svc.name)), h("span", { class: "ui-spacer" }), btn(t.close, "x", close, "ui-btn ui-ghost ui-sm")), list));
     };
     // Replicas of an application: saved then applied by a reload (start-first apps stay up while it rolls).
@@ -990,7 +995,7 @@ export function mount(el, ctx) {
         const n = Number(input.value);
         if (!Number.isInteger(n) || n < 0 || n > 20) { input.focus(); return; }
         const risks = (svc.risks || ["unknown"]).filter((x) => x !== "no_rebuild").concat(n === 0 ? ["stopped"] : []);
-        slot.replaceChildren(confirmPanel(svc, t.scaleQ(svc.name, n), async () => {
+        fill(slot, confirmPanel(svc, t.scaleQ(svc.name, n), async () => {
           try {
             await ctx.api("scale", { method: "POST", body: { id: svc.id, replicas: n } });
             say(t.scaled(svc.name, n), "ui-success");
@@ -1000,7 +1005,7 @@ export function mount(el, ctx) {
         }, close, risks.length ? risks : []));
       };
       input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
-      slot.replaceChildren(h("div", { class: "ui-card ui-stack" },
+      fill(slot, h("div", { class: "ui-card ui-stack" },
         h("div", { class: "ui-row" }, h("b", {}, t.scaleTitle(svc.name)), h("span", { class: "ui-spacer" }), btn(t.close, "x", close, "ui-btn ui-ghost ui-sm")),
         h("label", { class: "ui-label" }, t.scaleLabel), h("div", { class: "dk-actions" }, input, btn(t.scaleApply, "check", apply, "ui-btn ui-sm"))));
       queueMicrotask(() => input.focus());
@@ -1027,20 +1032,20 @@ export function mount(el, ctx) {
           if (!alive) return;
           if (only !== "all") queueMicrotask(draw);  // the Problems filter needs the states that just arrived
           const routed = (r.routed || []).map((x) => link(x, t.routedHelp));
-          if (routed.length) domCell.replaceChildren(...[spaced([...links, ...routed])].flat());
+          if (routed.length) fill(domCell, ...[spaced([...links, ...routed])].flat());
           const count = r.state === "unknown" || r.expected === 0 ? "" : ` ${r.running}/${r.expected ?? r.containers.length}`;
-          boxes.replaceChildren(h("span", {
+          fill(boxes, h("span", {
             class: `ui-badge ${HEALTH[r.state] || "ui-outline"}`,
             "data-state": r.state,  // the Problems filter reads it, not the translated text
             title: r.containers.map((b) => `${b.name}: ${b.state}${b.status ? ` (${b.status})` : ""}`).join("\n"),
           }, `${t.health[r.state] || r.state}${count}`));
-        }).catch(() => { if (alive) boxes.replaceChildren(h("span", { class: "ui-badge ui-outline" }, t.health.unknown)); }));
+        }).catch(() => { if (alive) fill(boxes, h("span", { class: "ui-badge ui-outline" }, t.health.unknown)); }));
       }
       const last = s.last_deployment ?? s.status;
       const more = deployable ? h("details", { class: "dk-more" },
         h("summary", { class: "ui-btn ui-ghost ui-sm", "aria-label": `${d.more}: ${s.name}` }, d.more),
         h("div", { class: "dk-menu", role: "group", "aria-label": s.name },
-          btn(t.deployLog, "file-text", () => slot.replaceChildren(logPanel(d.logsOf(s.name), `log?id=${encodeURIComponent(s.id)}`, close)), "ui-btn ui-ghost ui-sm"),
+          btn(t.deployLog, "file-text", () => fill(slot, logPanel(d.logsOf(s.name), `log?id=${encodeURIComponent(s.id)}`, close)), "ui-btn ui-ghost ui-sm"),
           !s.protected ? [
             btn(t.redeploy, "hammer", () => deploy(s, true), "ui-btn ui-ghost ui-sm"),
             s.kind === "application" && s.rollback_active ? btn(t.rollback, "refresh-cw", () => act(s, "rollback"), "ui-btn ui-ghost ui-sm") : null,
@@ -1073,7 +1078,7 @@ export function mount(el, ctx) {
         domCell,
         td(null, h("div", { class: "dk-actions" },
           deployable && !s.protected ? btn(t.deploy, "rocket", () => deploy(s, false), "ui-btn ui-sm") : null,
-          btn(d.live.btn, "terminal", () => slot.replaceChildren(liveLogPanel(s, close)), "ui-btn ui-outline ui-sm"),
+          btn(d.live.btn, "terminal", () => fill(slot, liveLogPanel(s, close)), "ui-btn ui-outline ui-sm"),
           more)));
     };
     const rows = services.map((s) => [s, row(s)]);
@@ -1084,7 +1089,7 @@ export function mount(el, ctx) {
         const text = `${s.name} ${s.project} ${s.environment || ""} ${(s.domains || []).map((x) => x.host).join(" ")} ${tr.children[3].textContent}`.toLowerCase();
         return (!q || text.includes(q)) && (only === "all" || problem(s, tr));
       });
-      listSlot.replaceChildren(shown.length
+      fill(listSlot, shown.length
         ? table([`${t.cols[4]}`, t.cols[0], t.cols[1], t.cols[5], ""], shown.map(([, tr]) => tr), "dk-svc")
         : empty(rows.length ? d.noMatch : t.empty));
     }
@@ -1125,12 +1130,12 @@ export function mount(el, ctx) {
     for (const [host, cells] of certCells) {
       const r = certs[host];
       for (const cell of cells) {
-        if (!r) { cell.replaceChildren("–"); continue; }
+        if (!r) { fill(cell, "–"); continue; }
         const days = r.days_left;
         const cls = !r.valid || days == null || days <= 7 ? "ui-error" : days <= 21 ? "ui-warning" : "ui-success";
         const text = r.error && !r.not_after ? d.dom.certNone : !r.valid ? d.dom.certBad : d.dom.certDays(days);
         const tip = [r.issuer ? d.dom.certBy(r.issuer) : null, r.not_after ? d.dom.certUntil(full(r.not_after)) : null, r.error].filter(Boolean).join("\n");
-        cell.replaceChildren(h("span", { class: `ui-badge ${cls}`, title: tip || null }, icon(r.valid ? "lock" : "triangle-alert"), " ", text));
+        fill(cell, h("span", { class: `ui-badge ${cls}`, title: tip || null }, icon(r.valid ? "lock" : "triangle-alert"), " ", text));
       }
     }
   }
@@ -1160,7 +1165,7 @@ export function mount(el, ctx) {
       td(c[5], h("span", { class: "ui-badge ui-outline", title: x.routed ? t.routedHelp : null }, x.routed ? d.dom.labels : d.dom.dokploy)))]);
     function draw() {
       const shown = rows.filter(([x]) => !q || [x.host, x.service, x.project].filter(Boolean).join(" ").toLowerCase().includes(q));
-      listSlot.replaceChildren(shown.length ? table(c, shown.map(([, tr]) => tr)) : empty(d.noMatch));
+      fill(listSlot, shown.length ? table(c, shown.map(([, tr]) => tr)) : empty(d.noMatch));
     }
     draw();
     readCerts();
@@ -1189,7 +1194,7 @@ export function mount(el, ctx) {
     const slot = h("div");
     const runBackup = (b) => {  // a dump now, to the backup's own destination, after the user confirmed
       const name = b.service || b.database || "backup";
-      slot.replaceChildren(confirmPanel({ name }, d.db.runQ(name), async () => {
+      fill(slot, confirmPanel({ name }, d.db.runQ(name), async () => {
         say(d.db.runStarted(name), "ui-info");
         try {
           const r = await ctx.api("backup", { method: "POST", body: { id: b.id } });
@@ -1208,21 +1213,21 @@ export function mount(el, ctx) {
     const body = h("div", {}, h("span", { class: "ui-skeleton", style: "display:block;height:1.2em;width:40%" }));
     ctx.api("previews").then(({ previews }) => {
       if (!alive) return;
-      if (!previews.length) { body.replaceChildren(h("p", { class: "ui-muted ui-small" }, P.none)); return; }
-      body.replaceChildren(table(c, previews.map((x) => h("tr", {},
+      if (!previews.length) { fill(body, h("p", { class: "ui-muted ui-small" }, P.none)); return; }
+      fill(body, table(c, previews.map((x) => h("tr", {},
         td(null, h("span", {}, x.pr_url ? h("a", { class: "ui-link", href: x.pr_url, target: "_blank", rel: "noopener noreferrer" }, `#${x.pr || "?"}`)
           : h("b", {}, `#${x.pr || "?"}`), x.title ? h("span", { class: "dk-sub" }, x.title) : null)),
         td(c[1], x.app || "–"),
         td(c[2], x.branch ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, x.branch) : "–"),
         td(c[3], status(x.last_deployment || x.status)),
         td(c[4], x.host ? link({ host: x.host, https: x.https }) : "–"),
-        td(null, btn(P.redeploy, "hammer", () => slot.replaceChildren(confirmPanel({ name: `#${x.pr}` }, P.q(`#${x.pr} (${x.app})`), async () => {
+        td(null, btn(P.redeploy, "hammer", () => fill(slot, confirmPanel({ name: `#${x.pr}` }, P.q(`#${x.pr} (${x.app})`), async () => {
           try {
             await ctx.api("preview-redeploy", { method: "POST", body: { id: x.id } });
             say(P.started(`#${x.pr}`), "ui-success");
           } catch (e) { fail(e); }
         }, () => slot.replaceChildren(), [])), "ui-btn ui-outline ui-sm"))))));
-    }).catch((e) => { if (alive) body.replaceChildren(h("p", { class: "ui-muted ui-small" }, e.message)); });
+    }).catch((e) => { if (alive) fill(body, h("p", { class: "ui-muted ui-small" }, e.message)); });
     return card(P.title, "git-branch", body, slot);
   }
 
@@ -1238,13 +1243,13 @@ export function mount(el, ctx) {
     const chips = chipGroup([["all", d.filter.all], ["error", d.filter.failed], ["running", d.filter.running]], (v) => { only = v; draw(); });
     function draw() {
       const shown = dash.deployments.filter((x) => only === "all" || x.status === only);
-      listSlot.replaceChildren(shown.length ? table(c, shown.map((x) => h("tr", {},
+      fill(listSlot, shown.length ? table(c, shown.map((x) => h("tr", {},
         td(null, h("span", {}, h("b", {}, x.service || d.dep[x.kind] || "–"), x.project ? h("span", { class: "dk-sub" }, x.project) : null)),
         td(c[1], status(x.status)),
         td(c[2], h("span", { style: "min-width:0" }, x.title || "–", x.error ? h("span", { class: "dk-sub", style: "color:var(--destructive)" }, x.error) : null)),
         td(c[3], h("time", { datetime: x.created || "", title: full(x.created) }, ago(x.created))),
         td(c[4], h("span", { class: "ui-num" }, dur(x.started || x.created, x.finished))),
-        td(null, x.has_log ? btn(d.dep.log, "file-text", () => slot.replaceChildren(
+        td(null, x.has_log ? btn(d.dep.log, "file-text", () => fill(slot, 
           logPanel(`${x.service || d.dep[x.kind] || ""} · ${x.title || ""}`, `deployment-log?id=${encodeURIComponent(x.id)}`, close)), "ui-btn ui-ghost ui-sm") : null)))) : empty(d.noMatch));
     }
     draw();
@@ -1285,7 +1290,7 @@ export function mount(el, ctx) {
     if (!liveBody || !liveBody.isConnected) return;
     const r = d.srv, cols = r.liveCols;
     const total = liveHist.get("_total") || [];
-    if (!total.length) { liveBody.replaceChildren(h("p", { class: "ui-muted ui-small" }, r.liveWait)); return; }
+    if (!total.length) { fill(liveBody, h("p", { class: "ui-muted ui-small" }, r.liveWait)); return; }
     const cores = dash?.resources?.cpus || 1, memTotal = dash?.resources?.mem_total || null;
     const last = total[total.length - 1];
     const row = (key, name) => {
@@ -1298,7 +1303,7 @@ export function mount(el, ctx) {
     const svcRows = [...liveHist.keys()].filter((k) => !k.startsWith("_"))
       .map((k) => [k, (liveHist.get(k).at(-1) || {}).cpu || 0]).sort((a, b) => b[1] - a[1]).slice(0, 12)
       .map(([k]) => row(k, (services.find((s) => s.id === k) || dash?.services?.find((s) => s.id === k) || {}).name || k));
-    liveBody.replaceChildren(h("div", { class: "ui-stack" },  // h() skips the null parts, replaceChildren would print them
+    fill(liveBody, h("div", { class: "ui-stack" },  // h() skips the null parts, replaceChildren would print them
       h("div", { class: "dk-cols" },
         h("div", { class: "dk-meter" }, h("div", { class: "dk-meter-row" }, h("b", {}, `${d.res.cpu} · ${r.liveTotal}`), h("span", { class: "ui-spacer" }),
           h("span", { class: "ui-num ui-muted" }, `${nf.format(last.cpu)} % / ${cores * 100} %`)),
@@ -1337,7 +1342,7 @@ export function mount(el, ctx) {
     if (!cache) return null;
     const slot = h("div");
     const close = () => slot.replaceChildren();
-    const go = () => slot.replaceChildren(confirmPanel({ name: "cache" }, d.srv.cacheQ, async () => {
+    const go = () => fill(slot, confirmPanel({ name: "cache" }, d.srv.cacheQ, async () => {
       try {
         const r = await ctx.api("cleanup", { method: "POST", body: { what: "build-cache" } });
         say(d.srv.cacheDone(r.freed ? bytes(r.freed) : null), "ui-success");
@@ -1402,7 +1407,7 @@ export function mount(el, ctx) {
     rendered.clear();
     certs = null;  // Refresh checks the certificates again
     certCells.clear();
-    body.replaceChildren(skeleton());
+    fill(body, skeleton());
     try {
       const st = info = await ctx.api("status");
       if (!alive || mine !== generation) return;
@@ -1412,11 +1417,11 @@ export function mount(el, ctx) {
         subtitle.textContent = t.intro;
         if (!st.key_present) say(t.keyMissing, "ui-warning");
         else if (st.key_changed) say(t.keyChanged, "ui-warning");
-        body.replaceChildren(connectForm(st));
+        fill(body, connectForm(st));
         return;
       }
       subtitle.textContent = d.subtitle(st.url);
-      headBtns.replaceChildren(btn(t.refresh, "refresh-cw", load),
+      fill(headBtns, btn(t.refresh, "refresh-cw", load),
         btn(t.disconnect, null, async () => {
           try { await ctx.api("disconnect", { method: "POST" }); say(""); load(); } catch (e) { fail(e); }
         }, "ui-btn ui-ghost ui-sm"));
@@ -1435,7 +1440,7 @@ export function mount(el, ctx) {
         panels.set(k, p);
         wrap.append(p);
       }
-      body.replaceChildren(bar, wrap);
+      fill(body, bar, wrap);
       counts();
       render(tab);
     } catch (e) {
