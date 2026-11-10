@@ -180,6 +180,9 @@ DASH = {
         "destination": {"secretAccessKey": "leak-dest-secret"},
     },
     "backup.manualBackupPostgres": True,
+    "docker.restartContainer": True,
+    "application.update": True,
+    "application.reload": True,
     "overview.domains": [
         {
             "host": "web.example.com",

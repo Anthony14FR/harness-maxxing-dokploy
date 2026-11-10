@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.10.0 - 2026-11-10
+
+- **Restart one container**: Services → **More** → **Restart a container** lists the service's own containers (the
+  running ones for an application) and restarts the one you pick, after you type its name.
+- **Scale an application**: **More** → **Scale** sets its replicas (0 to 20) and applies them at once; the risk is said
+  first (an app that is not start-first is down a few seconds). `dokploy.py restart` and `scale` do the same for
+  sessions, with `--yes` after you agreed. Protected services refuse both.
+
 ## 1.9.0 - 2026-11-10
 
 - **Back up a database now**: Databases → Backups → **Back up now** runs one of its backups at once (a dump sent to

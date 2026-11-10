@@ -114,6 +114,14 @@ def parser() -> argparse.ArgumentParser:
         x = sub.add_parser(name, help=what)
         x.add_argument("app")
         x.add_argument("--yes", action="store_true")
+    rs = sub.add_parser("restart", help="restart one container of the service (see health --json for ids)")
+    rs.add_argument("app")
+    rs.add_argument("--container", required=True)
+    rs.add_argument("--yes", action="store_true")
+    sc = sub.add_parser("scale", help="set an application's replicas and apply them (reloads it)")
+    sc.add_argument("app")
+    sc.add_argument("replicas", type=int)
+    sc.add_argument("--yes", action="store_true")
     hp = sub.add_parser("health", help="containers really running, not the last deployment")
     hp.add_argument("app")
     hp.add_argument("--json", action="store_true")
@@ -325,13 +333,33 @@ def run(a: argparse.Namespace) -> int:
                 print("Nothing in Dokploy yet.")
         return 0
     svc = core.lookup(c, a.app)
-    if a.action in ("deploy", "redeploy", "stop", "start", "rollback") or getattr(a, "sub", None) == "add":
+    if (
+        a.action in ("deploy", "redeploy", "stop", "start", "rollback", "restart", "scale")
+        or getattr(a, "sub", None) == "add"
+    ):
         core.guard(st, svc)  # protected: refused before even asking the user
     if a.action in ("deploy", "redeploy"):
         if not _agreed(a, f"{a.action} {svc['project']}/{svc['name']}{_warned(svc)}"):
             return 3
         core.deploy(c, svc, a.title, again=a.action == "redeploy")
         print(f"{a.action} of {svc['name']} started; follow it with: dokploy.py logs {svc['id']}")
+        return 0
+    if a.action == "restart":
+        if not _agreed(
+            a,
+            f"restart container {a.container} of {svc['project']}/{svc['name']} "
+            "(tell the user: it is away a few seconds)",
+        ):
+            return 3
+        core.restart_container(c, svc, a.container)
+        print(f"{svc['name']}: container {a.container} restarted; check it with: dokploy.py health {svc['id']}")
+        return 0
+    if a.action == "scale":
+        down = f" (tell the user: {RISK_TEXT['downtime']})" if "downtime" in core.risks(svc) else ""
+        if not _agreed(a, f"scale {svc['project']}/{svc['name']} to {a.replicas} replicas{down}"):
+            return 3
+        core.scale(c, svc, a.replicas)
+        print(f"{svc['name']}: {a.replicas} replicas asked; check it with: dokploy.py health {svc['id']}")
         return 0
     if a.action in ("stop", "start"):
         warn = " (tell the user: the site is down until it is started again)" if a.action == "stop" else ""

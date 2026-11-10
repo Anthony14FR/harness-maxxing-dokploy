@@ -41,7 +41,8 @@ flowchart LR
     touched: Dokploy's other cleanups are not reachable from here.
 - **Made for every screen** - tables turn into cards on a phone, 44 px touch targets, keyboard tabs (arrows, Home,
   End), no color without a word, Harness's own colors and icons in light and dark, English or French as Harness is set.
-- **Actions that ask first** - Deploy, Rebuild, Roll back, Stop, Start. When the site can be down for a few seconds,
+- **Actions that ask first** - Deploy, Rebuild, Roll back, Stop, Start, Restart one container, Scale an application's
+  replicas. When the site can be down for a few seconds,
   you type the service name to confirm.
 - **Protected services** - mark production read-only: the page and the sessions refuse every write until you lift it.
 - **Claude knows Dokploy** - a skill to list what runs, explain a failed deployment from its log, deploy, add a
@@ -132,6 +133,8 @@ python3 $D logs APP [--deployment ID] [--lines N]
 python3 $D container-logs APP [--container ID] [--lines N] [--since 1h] [--search TEXT]
 python3 $D domain list APP
 python3 $D deploy | redeploy | stop | start | rollback APP --yes
+python3 $D restart APP --container ID --yes        # one of its containers (ids: health --json)
+python3 $D scale APP REPLICAS --yes                 # applications: 0 to 20, applied by a reload
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build T] --yes
 ```
@@ -170,7 +173,8 @@ validated first.
   (one of the stack's own containers only) and `<database>.readLogs`. Only listed plain fields are kept: nested objects (where Dokploy
   puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets
   (web server settings, certificates, destinations, ssh keys) are never called.
-- Writes, each after you agree: `backup.manualBackup<Postgres|MySql|Mariadb|Mongo|Libsql|Compose>`, `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
+- Writes, each after you agree: `docker.restartContainer` (one of the service's own containers), `application.update`
+  (replicas only) then `application.reload`, `backup.manualBackup<Postgres|MySql|Mariadb|Mongo|Libsql|Compose>`, `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
   `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
 - Updates: `settings.getDokployVersion`, `settings.getUpdateData`, `settings.getTraefikOverview`, and after you confirm

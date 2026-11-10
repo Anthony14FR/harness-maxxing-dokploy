@@ -175,6 +175,14 @@ def handle(ctx, method, path, query, body):
             svc = core.lookup(c, str(query.get("id") or ""))
             d = core.rollback_target(c, svc)
             return {"deployment": d["id"], "title": d["title"], "created": d["created"]}
+        if path == "restart" and method == "POST":  # one container of the service, after the page asked the user
+            svc = core.lookup(c, str(body.get("id") or ""))
+            core.guard(state, svc)
+            return core.restart_container(c, svc, str(body.get("container") or ""))
+        if path == "scale" and method == "POST":  # replicas of an application, after the page asked the user
+            svc = core.lookup(c, str(body.get("id") or ""))
+            core.guard(state, svc)
+            return core.scale(c, svc, body.get("replicas"))
         if path == "action" and method == "POST":  # stop, start or rollback, after the page asked the user
             svc = core.lookup(c, str(body.get("id") or ""))
             act = body.get("action")
