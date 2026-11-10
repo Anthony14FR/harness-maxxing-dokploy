@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 - 2026-11-10
+
+- **Update Traefik from Harness**: when Dokploy recommends a newer Traefik, **Updates** (and the Server tab) offer
+  **Update Traefik**. You type `traefik` to confirm; Dokploy pulls the image and recreates Traefik with its environment
+  and ports, so your sites can be unreachable for a few seconds. The page follows it until Traefik runs the new version,
+  or shows Dokploy's error (a failed update keeps the previous Traefik). It only runs the version you confirmed, never
+  while another update runs or while Traefik is stopped. A failed last update appears in **Overview → Needs your
+  attention**; `dokploy.py updates` shows Traefik too (sessions still never update anything).
+
 ## 1.4.2 - 2026-11-10
 
 - **Readable update notes**: the notes of a new version are shown formatted (version headings, bullets, bold, code)

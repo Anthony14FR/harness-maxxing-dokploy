@@ -38,6 +38,8 @@ def test_dashboard_reads_the_whole_dokploy(dash):
         "recommended": "3.7.16",
         "version_status": "outdated",
         "started": "2026-11-10T07:00:00Z",
+        "updating": None,
+        "error": None,  # Dokploy gave an object there: never passed on
     }
     assert dash["ip"] == "203.0.113.10" and dash["queue"] == 1
     assert dash["log_cleanup"] == {"enabled": True, "cron": "0 0 * * *"}
@@ -168,3 +170,40 @@ def test_an_odd_health_shape_gives_empty_values_not_an_error(core):
     assert r["cpus"] is None and r["disk_total"] is None
     with pytest.raises(core.DokployError):
         core.log({"log_path": 42})
+
+
+def test_traefik_update_runs_only_the_confirmed_version(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    chk = api.handle(ctx(state), "GET", "updates", {}, None)["traefik"]
+    assert (chk["version"], chk["recommended"], chk["available"]) == ("3.6.25", "3.7.16", True)
+    code, err = api.handle(ctx(state), "POST", "update", {}, {"what": "traefik", "to": "3.8.0"})
+    assert (code, err["error"]) == (409, "target_changed") and ("POST", "settings.updateTraefik", {}) not in fake.calls
+    assert api.handle(ctx(state), "POST", "update", {}, {"what": "traefik", "to": "3.7.16"}) == {
+        "updated": "traefik",
+        "version": "3.7.16",
+    }
+    assert ("POST", "settings.updateTraefik", {}) in fake.calls
+
+
+@pytest.mark.parametrize(
+    ("change", "error"),
+    [
+        ({"versionStatus": "up-to-date"}, "up_to_date"),
+        ({"state": "exited"}, "update_refused"),
+        ({"isUpdating": True}, "update_in_progress"),
+    ],
+)
+def test_traefik_update_refusals(api, fake, state, monkeypatch, change, error):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    monkeypatch.setitem(DASH, "settings.getTraefikOverview", {**DASH["settings.getTraefikOverview"], **change})
+    code, err = api.handle(ctx(state), "POST", "update", {}, {"what": "traefik", "to": "3.7.16"})
+    assert (code, err["error"]) == (409, error)
+    assert ("POST", "settings.updateTraefik", {}) not in fake.calls
+
+
+def test_traefik_last_error_is_shown_masked(api, fake, state, monkeypatch):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    bad = {**DASH["settings.getTraefikOverview"], "lastUpdateError": "pull https://u:tok@registry.example.com failed"}
+    monkeypatch.setitem(DASH, "settings.getTraefikOverview", bad)
+    assert api.handle(ctx(state), "GET", "traefik", {}, None)["error"] == "pull https://***@registry.example.com failed"
+    assert api.handle(ctx(state), "GET", "dashboard", {}, None)["traefik"]["error"].startswith("pull https://***@")

@@ -526,6 +526,37 @@ def dokploy_check(c: Client) -> dict:
     }
 
 
+TRAEFIK_KEYS = {"state": "state", "currentVersion": "version", "recommendedVersion": "recommended"}
+TRAEFIK_KEYS |= {"versionStatus": "version_status", "startedAt": "started", "isUpdating": "updating"}
+
+
+def traefik_check(c: Client) -> dict:
+    """Dokploy's view of its Traefik: running version, the one Dokploy recommends, and the last update's error."""
+    o = c.get("settings.getTraefikOverview")
+    if not isinstance(o, dict):
+        raise DokployError("not_supported", "this Dokploy does not report its Traefik version (v0.31 or later does)")
+    out = _pick(o, TRAEFIK_KEYS)
+    err = o.get("lastUpdateError")
+    out["error"] = redact(err)[:300] if isinstance(err, str) and err else None
+    out["available"] = out.get("version_status") == "outdated" and out.get("state") == "running"
+    return out
+
+
+def traefik_update(c: Client, confirmed: str) -> dict:
+    """Dokploy recreates Traefik on the version it recommends, keeping its env and ports; sites can be away seconds."""
+    chk = traefik_check(c)
+    if chk.get("updating"):
+        raise DokployError("update_in_progress", "a Traefik update is already running: wait for it")
+    if chk.get("state") != "running":
+        raise DokployError("update_refused", "Traefik is not running: start it in Dokploy (Reload), then update it")
+    if chk.get("version_status") != "outdated":
+        raise DokployError("up_to_date", "Traefik is already on the version Dokploy recommends")
+    if chk.get("recommended") != confirmed:
+        raise DokployError("target_changed", "Dokploy now recommends another Traefik version: check again")
+    c.post("settings.updateTraefik", {})  # returns at once; the page follows it with traefik_check
+    return chk
+
+
 def dokploy_update(c: Client, confirmed: str, state_dir: str | Path) -> dict:
     """Dokploy updates itself to its latest release; its page is away about two minutes, Traefik and apps run on."""
     marker = Path(state_dir) / "dokploy-update-started"
@@ -1213,8 +1244,7 @@ def dashboard(c: Client) -> dict:
     stats, infra = got["stats"], got["infra"]
     skeys = {"projects": "projects", "environments": "environments", "applications": "applications"}
     skeys |= {"compose": "compose", "databases": "databases", "services": "services"}
-    tkeys = {"state": "state", "currentVersion": "version", "recommendedVersion": "recommended"}
-    tkeys |= {"versionStatus": "version_status", "startedAt": "started"}
+    tkeys = TRAEFIK_KEYS | {"lastUpdateError": "error"}
     dkeys = {"type": "type", "totalCount": "total", "active": "active", "size": "size"}
     dkeys |= {"reclaimable": "reclaimable", "sizeBytes": "bytes"}
     vkeys = {"serverId": "id", "name": "name", "ipAddress": "ip", "serverStatus": "status", "serverType": "type"}
@@ -1230,7 +1260,9 @@ def dashboard(c: Client) -> dict:
         "infra": {k: _pick(v, {"status": "status"}).get("status") for k, v in infra.items() if isinstance(v, dict)}
         if isinstance(infra, dict)
         else None,
-        "traefik": _pick(got["traefik"], tkeys) or None,
+        "traefik": {**t, "error": redact(t["error"])[:300] if t.get("error") else None}
+        if (t := _pick(got["traefik"], tkeys))
+        else None,
         "ip": got["ip"] if isinstance(got["ip"], str) else None,
         "disk_usage": when("disk", [_pick(r, dkeys) for r in _rows(got["disk"])]),
         "log_cleanup": _pick(got["cleanup"], {"enabled": "enabled", "cronExpression": "cron"}) or None,

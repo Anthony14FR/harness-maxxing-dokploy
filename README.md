@@ -86,6 +86,7 @@ On the Dokploy page: **Updates → Check for updates**.
 |---|---|
 | **This extension** | **Update** only when clean: no local change, fast-forward, its GitHub checks passed, supported by your Harness. Pulls exactly the commit you saw, refreshes the skill, reloads the page. |
 | **Dokploy** | Type `dokploy` to confirm; Dokploy updates itself to its latest release. Sites stay up; Dokploy's own page is away about two minutes. |
+| **Traefik** | When Dokploy recommends a newer Traefik: type `traefik` to confirm (also in the Server tab). Dokploy pulls the image, then recreates Traefik with its environment and ports; your sites can be unreachable for a few seconds. The page follows it until Traefik runs the new version, or shows Dokploy's error (a failed update keeps the previous Traefik: measured on a test server, the sites stayed up). Needs Dokploy v0.31 or later. |
 | **Harness Maxxing** | Link to Settings → Updates (its own checks and rollback). |
 
 By hand, the same as the button: `git -C /root/maxxing/extensions/dokploy pull --ff-only`. Folder owned by another
@@ -150,7 +151,8 @@ validated first.
 - Writes, each after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
   `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
-- Updates: `settings.getDokployVersion`, `settings.getUpdateData`, and after you confirm `settings.updateServer`.
+- Updates: `settings.getDokployVersion`, `settings.getUpdateData`, `settings.getTraefikOverview`, and after you confirm
+  `settings.updateServer` (Dokploy) or `settings.updateTraefik` (Traefik).
 </details>
 
 Found a vulnerability? See [SECURITY.md](SECURITY.md): report it privately, not in an issue.
