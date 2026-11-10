@@ -26,9 +26,18 @@ flowchart LR
 
 ## Features
 
-- **One page for everything** - projects, applications, compose stacks, databases and domains, with the last
-  deployment, the containers really running (`running 2/2`, `partly down`, `down`), and the domains Dokploy declares
-  or that a compose routes with its own Traefik labels.
+- **A full dashboard, no need to open Dokploy** - updates on top, then six tabs:
+  - **Overview**: what needs your attention (failed deployments, disk or memory almost full, HTTP-only domains,
+    queue), counters, CPU / memory / disk, recent deployments;
+  - **Services**: every app, stack and database with its last deployment, the containers really running
+    (`running 2/2`, `partly down`, `down`), its domains and its actions; search and a Problems filter;
+  - **Domains**: every domain, HTTPS or not, its certificate, and the ones a compose routes with its own Traefik labels;
+  - **Databases**: their containers and their backups (schedule, last run);
+  - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
+  - **Server**: resources, Dokploy's database and Traefik (version, update available), public IP, Docker disk usage,
+    remote servers.
+- **Made for every screen** - tables turn into cards on a phone, 44 px touch targets, keyboard tabs (arrows, Home,
+  End), no color without a word, Harness's own colors and icons in light and dark, English or French as Harness is set.
 - **Actions that ask first** - Deploy, Rebuild, Roll back, Stop, Start. When the site can be down for a few seconds,
   you type the service name to confirm.
 - **Protected services** - mark production read-only: the page and the sessions refuse every write until you lift it.
@@ -49,7 +58,8 @@ Needs Harness Maxxing with page extensions and a Dokploy the Harness server can 
    git clone https://github.com/Anthony14FR/harness-maxxing-dokploy.git /root/maxxing/extensions/dokploy
    ```
 
-2. **Rescan**: Settings → Pages → **Rescan**, then turn on **In the sidebar** for Dokploy.
+2. **Rescan**: Settings → Pages → **Rescan**. **Dokploy** appears in the sidebar by itself (once: if you unpin it,
+   it stays unpinned; on a Harness where that fails, turn on **In the sidebar** there).
 3. **Key**: in Dokploy, Settings → Profile → **API/CLI Keys** → **Generate New Key** (shown once). In Harness,
    Settings → Keys → **Add a key**: `DOKPLOY_API_KEY`, and leave **Expose to Harness sessions** off.
 4. **Connect**: on the Dokploy page, check the address (default `http://127.0.0.1:3000`) → **Check and connect**.
@@ -131,6 +141,12 @@ validated first.
 - Reads: `project.all`, `application.one`, `compose.one`, `deployment.all`, `deployment.allByCompose`,
   `docker.getContainersByAppNameMatch`, `docker.getStackContainersByAppName`, `docker.getConfig` (a compose's running
   containers: only their Traefik routing labels are kept, the rest, environment included, is dropped at once).
+- Dashboard reads: `project.homeStats`, `docker.getServerHealth`, `docker.getContainers`,
+  `settings.checkInfrastructureHealth`, `settings.getTraefikOverview`, `settings.getIp`, `settings.getDockerDiskUsage`,
+  `settings.getLogCleanupStatus`, `server.all`, `overview.services`, `overview.domains`, `overview.backups`,
+  `deployment.allCentralized`, `deployment.queueList`. Only listed plain fields are kept: nested objects (where Dokploy
+  puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets
+  (web server settings, certificates, destinations, ssh keys) are never called.
 - Writes, each after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
   `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.

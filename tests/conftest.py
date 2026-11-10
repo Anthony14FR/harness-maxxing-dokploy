@@ -85,6 +85,160 @@ CONTAINERS = {
     ],
 }
 
+# Dashboard reads (Dokploy v0.31); "leak-*" values sit where Dokploy nests secrets: they must never reach the page
+DASH = {
+    "project.homeStats": {
+        "projects": 2,
+        "environments": 2,
+        "applications": 3,
+        "compose": 1,
+        "databases": 1,
+        "services": 5,
+        "status": {"running": 3, "error": 1, "idle": 1},
+    },
+    "docker.getServerHealth": {
+        "checkedAt": "2026-11-10T08:00:00Z",
+        "containers": {"containerCount": 6, "serviceCount": 2},
+        "resources": {"memTotalBytes": 8_000_000_000, "memUsedBytes": 6_000_000_000, "cpuCount": 4},
+        "disk": {"totalBytes": 100_000_000_000, "usedBytes": 90_000_000_000},
+        "reservation": {"memoryReservedBytes": 1_000_000_000, "cpuReservedNanoCpus": 1_500_000_000},
+    },
+    "settings.checkInfrastructureHealth": {"postgres": {"status": "healthy"}, "traefik": {"status": "healthy"}},
+    "settings.getTraefikOverview": {
+        "state": "running",
+        "currentVersion": "3.6.25",
+        "recommendedVersion": "3.7.16",
+        "versionStatus": "outdated",
+        "startedAt": "2026-11-10T07:00:00Z",
+        "lastUpdateError": {"leak": "leak-traefik"},
+    },
+    "settings.getIp": "203.0.113.10",
+    "settings.getDockerDiskUsage": [
+        {
+            "type": "Images",
+            "totalCount": 6,
+            "active": 5,
+            "size": "7.5GB",
+            "reclaimable": "3.2GB (42%)",
+            "sizeBytes": 8e9,
+        }
+    ],
+    "settings.getLogCleanupStatus": {"enabled": True, "cronExpression": "0 0 * * *"},
+    "server.all": [
+        {
+            "serverId": "s1",
+            "name": "edge",
+            "ipAddress": "198.51.100.7",
+            "serverStatus": "active",
+            "sshKey": {"privateKey": "leak-ssh-key"},
+            "sshKeyId": "k1",
+        }
+    ],
+    "overview.services": [
+        {
+            "id": "a1",
+            "name": "web",
+            "appName": "acme-web-x1",
+            "type": "application",
+            "status": "done",
+            "projectName": "acme",
+            "environmentName": "production",
+            "lastDeployAt": "2026-11-10T07:30:00Z",
+        },
+        {
+            "id": "c1",
+            "name": "stack",
+            "appName": "acme-stack",
+            "type": "compose",
+            "status": "done",
+            "projectName": "acme",
+            "environmentName": "production",
+        },
+    ],
+    "overview.domains": [
+        {
+            "host": "web.example.com",
+            "path": "/",
+            "port": 3000,
+            "https": True,
+            "certificateType": "letsencrypt",
+            "enabled": True,
+            "serviceName": "web",
+            "serviceOwnerId": "a1",
+            "serviceOwnerType": "application",
+            "projectName": "acme",
+            "environmentName": "production",
+        },
+        {
+            "host": "shop.example.com",
+            "path": "/",
+            "port": 80,
+            "https": False,
+            "certificateType": "none",
+            "enabled": True,
+            "serviceName": "stack",
+            "serviceOwnerId": "c1",
+            "serviceOwnerType": "compose",
+            "projectName": "acme",
+            "environmentName": "production",
+        },
+    ],
+    "overview.backups": [
+        {
+            "backupId": "b1",
+            "schedule": "0 3 * * *",
+            "enabled": True,
+            "database": "shop",
+            "databaseType": "postgres",
+            "keepLatestCount": 7,
+            "serviceName": "db",
+            "destination": {"secretAccessKey": "leak-s3-secret"},
+        }
+    ],
+    "deployment.allCentralized": [
+        {
+            "deploymentId": "x1",
+            "title": "old",
+            "status": "done",
+            "applicationId": "a1",
+            "createdAt": "2026-11-08T10:00:00Z",
+            "finishedAt": "2026-11-08T10:01:00Z",
+            "logPath": None,
+        },
+        {
+            "deploymentId": "x2",
+            "title": "fix: checkout\n\nbody",
+            "status": "error",
+            "applicationId": "a1",
+            "createdAt": "2026-11-10T07:30:00Z",
+            "startedAt": "2026-11-10T07:30:00Z",
+            "finishedAt": "2026-11-10T07:31:05Z",
+            "errorMessage": "build failed",
+            "logPath": "/elsewhere/x2.log",
+        },
+        {
+            "deploymentId": "x3",
+            "title": "Backup",
+            "status": "done",
+            "backupId": "b1",
+            "createdAt": "2026-11-10T03:00:00Z",
+            "logPath": None,
+        },
+    ],
+    "deployment.queueList": [{"id": "q1"}],
+    "docker.getContainers": [
+        {
+            "containerId": "2",
+            "name": "acme-stack-web-1",
+            "state": "running",
+            "status": "Up 1 hour",
+            "image": "nginx",
+            "ports": "80/tcp",
+        },
+        {"containerId": "7", "name": "acme-db.1.x", "state": "running", "status": "Up", "image": "postgres:16"},
+    ],
+}
+
 # docker inspect of a compose container routing its own hosts (no Dokploy domain); Env must never leave core
 INSPECT = {
     "2": {
@@ -245,6 +399,8 @@ class FakeDokploy:
             "rollback.rollback",
         ):
             return 200, b""
+        if proc in DASH:
+            return 200, DASH[proc]
         return 404, {"message": "no such procedure"}
 
     def writes(self):
