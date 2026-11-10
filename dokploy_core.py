@@ -1768,3 +1768,48 @@ def check_certificates(state_dir: str | Path, hosts: list[str]) -> list[dict]:
         return []
     with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
         return list(ex.map(lambda h: check_certificate(address, h), todo))
+
+
+# Preview deployments (one URL per pull request, Dokploy's GitHub integration): listed per application; only
+# Redeploy is offered (deleting one stays in Dokploy), and it follows the protection of the application it belongs to.
+PREVIEW_APPS = 20
+
+
+def _preview(p: dict, app: dict) -> dict:
+    row = _pick(
+        p, {"previewDeploymentId": "id", "branch": "branch", "pullRequestNumber": "pr", "previewStatus": "status"}
+    )
+    row |= _pick(p, {"createdAt": "created", "expiresAt": "expires", "appName": "app_name"})
+    title = p.get("pullRequestTitle")
+    row["title"] = str(title)[:160] if isinstance(title, str) else None
+    url = p.get("pullRequestURL")
+    row["pr_url"] = url if isinstance(url, str) and url.startswith("https://") else None
+    dom = p.get("domain") if isinstance(p.get("domain"), dict) else {}
+    host = str(dom.get("host") or "").lower()
+    row["host"], row["https"] = (host, bool(dom.get("https"))) if HOST_RE.match(host) else (None, False)
+    runs = sorted(_rows(p.get("deployments")), key=lambda d: _when(d.get("createdAt")), reverse=True)
+    row["last_deployment"] = runs[0].get("status") if runs else None
+    return {**row, "app_id": app.get("id"), "app": app.get("name"), "project": app.get("project")}
+
+
+def previews(c: Client) -> list[dict]:
+    """Every application's preview deployments, newest first."""
+    apps = [s for s in services(c.get("project.all")) if s["kind"] == "application"][:PREVIEW_APPS]
+    if not apps:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(apps))) as ex:
+        found = list(ex.map(lambda a: _try(c, "previewDeployment.all", {"applicationId": a["id"]}), apps))
+    out = [_preview(p, a) for a, rows in zip(apps, found, strict=True) for p in _rows(rows)]
+    return sorted(out, key=lambda r: _when(r.get("created")), reverse=True)
+
+
+def redeploy_preview(c: Client, state_dir: str | Path, preview_id: str) -> dict:
+    """Rebuilds one preview deployment, unless its application is protected."""
+    if not CONTAINER_RE.match(preview_id or ""):
+        raise DokployError("bad_value", "unknown preview deployment")
+    p = c.get("previewDeployment.one", {"previewDeploymentId": preview_id})
+    if not isinstance(p, dict) or not p.get("applicationId"):
+        raise DokployError("not_found", "no such preview deployment")
+    guard(state_dir, lookup(c, str(p["applicationId"])))
+    c.post("previewDeployment.redeploy", {"previewDeploymentId": preview_id, "title": "Harness Maxxing"})
+    return {"started": preview_id}
