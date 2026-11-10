@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0 - 2026-11-10
+
+- **Free disk space safely**: Server → Docker disk usage → **Clear the build cache**. Only Docker's build cache is
+  deleted (the next builds take longer); it is refused while a deployment runs or waits. Volumes (your data), images
+  (what a rollback starts again), containers and databases are never touched, and no other cleanup can be asked for
+  from the page. The space freed is shown.
+
 ## 1.6.0 - 2026-11-10
 
 - **Alerts in Harness notifications (and Telegram)**: Overview → **Alerts** → **Turn alerts on**. Every 5 minutes a

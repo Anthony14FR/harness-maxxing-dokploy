@@ -64,6 +64,7 @@ const T = {
       stopped: "The site stays down until you start it again.",
       dokploy_away: "Your sites stay up: Traefik and the apps keep running. Dokploy's own page and API are away for about 2 minutes.",
       traefik_restart: "Dokploy recreates Traefik, which serves all your sites: they can be unreachable for a few seconds. Its environment and ports are kept; if the update fails, Dokploy keeps the previous version.",
+      cache_only: "Only Docker's build cache is deleted: the next builds take longer, nothing else changes. Volumes (your data), images (what a rollback starts again), containers and databases are never touched.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
@@ -113,7 +114,9 @@ const T = {
       srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `On (${c})`, off: "Off",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommended` : v), docker: "Docker disk usage",
         dcols: ["Type", "Count", "Active", "Size", "Reclaimable"], servers: "Remote servers", noServers: "Only this server.",
-        services: (n) => `${n} swarm services`, checked: (w) => `Checked ${w}`, healthy: "Healthy", outdated: "Update available", on: "On" },
+        services: (n) => `${n} swarm services`, checked: (w) => `Checked ${w}`, healthy: "Healthy", outdated: "Update available", on: "On",
+        cache: (s) => `Build cache: ${s}`, cacheBtn: "Clear the build cache", cacheQ: "Clear Docker's build cache now?",
+        cacheDone: (f) => (f ? `Build cache cleared: ${f} freed.` : "Build cache cleared."), cacheSafe: "Only the build cache can be cleared here: your data, images and containers are never touched." },
       dashFailed: "The dashboard could not be read, only the services are shown:",
       st: { done: "Done", error: "Failed", running: "In progress", idle: "Idle", queued: "Queued", cancelled: "Cancelled" },
       kind: { application: "app", compose: "compose", postgres: "PostgreSQL", mysql: "MySQL", mariadb: "MariaDB", mongo: "MongoDB", redis: "Redis", libsql: "libSQL" },
@@ -187,6 +190,7 @@ const T = {
       stopped: "Le site reste coupé jusqu’à ce que vous le redémarriez.",
       dokploy_away: "Vos sites restent en ligne : Traefik et les apps continuent de tourner. La page et l’API de Dokploy sont absentes 2 minutes environ.",
       traefik_restart: "Dokploy recrée Traefik, qui sert tous vos sites : ils peuvent être injoignables quelques secondes. Ses variables d’environnement et ses ports sont gardés ; si la mise à jour échoue, Dokploy garde l’ancienne version.",
+      cache_only: "Seul le cache de build de Docker est supprimé : les prochains builds sont plus longs, rien d’autre ne change. Les volumes (vos données), les images (ce qu’un retour arrière relance), les conteneurs et les bases ne sont jamais touchés.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
@@ -236,7 +240,9 @@ const T = {
       srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `Activé (${c})`, off: "Désactivé",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommandée` : v), docker: "Espace disque Docker",
         dcols: ["Type", "Nombre", "Actifs", "Taille", "Récupérable"], servers: "Serveurs distants", noServers: "Uniquement ce serveur.",
-        services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "Sain", outdated: "Mise à jour disponible", on: "Activée" },
+        services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "Sain", outdated: "Mise à jour disponible", on: "Activée",
+        cache: (s) => `Cache de build : ${s}`, cacheBtn: "Vider le cache de build", cacheQ: "Vider le cache de build de Docker maintenant ?",
+        cacheDone: (f) => (f ? `Cache de build vidé : ${f} libérés.` : "Cache de build vidé."), cacheSafe: "Seul le cache de build peut être vidé ici : vos données, images et conteneurs ne sont jamais touchés." },
       alerts: { title: "Alertes", badgeOn: "Activées", badgeOff: "Désactivées", on: "Activées : toutes les 5 minutes, les nouveaux problèmes arrivent dans les notifications de Harness (puis leur résolution).", off: "Désactivées : activez-les pour recevoir dans les notifications de Harness les déploiements et sauvegardes en échec, les services en panne, un disque plein et les erreurs de Traefik.",
         how: "Telegram suit la règle de la source Dokploy dans Réglages → Notifications. Une tâche cron de Harness (Dokploy alerts) fait la vérification ; elle ne fait que lire Dokploy.",
         enable: "Activer les alertes", disable: "Désactiver les alertes", runNow: "Vérifier maintenant", ran: "Vérification lancée : les nouveaux problèmes apparaissent dans les notifications.", rules: "Réglages des notifications",
@@ -1047,6 +1053,27 @@ export function mount(el, ctx) {
       h("div", { class: "dk-tools" }, chips, dash.queue ? h("span", { class: "ui-badge ui-warning" }, d.dep.queue(dash.queue)) : null), slot, listSlot);
   }
 
+  // The one cleanup offered: Docker's build cache (rebuilt by the next builds); the server refuses any other target.
+  function cacheTools() {
+    const cache = (dash?.disk_usage || []).find((x) => /^build/i.test(String(x.type || "")));
+    if (!cache) return null;
+    const slot = h("div");
+    const close = () => slot.replaceChildren();
+    const go = () => slot.replaceChildren(confirmPanel({ name: "cache" }, d.srv.cacheQ, async () => {
+      try {
+        const r = await ctx.api("cleanup", { method: "POST", body: { what: "build-cache" } });
+        say(d.srv.cacheDone(r.freed ? bytes(r.freed) : null), "ui-success");
+        load();
+      } catch (e) { fail(e); }
+    }, close, ["cache_only"]));
+    return h("div", { class: "ui-stack", style: "gap:8px;margin-top:8px" },
+      h("div", { class: "dk-actions" },
+        h("span", { class: "ui-small" }, d.srv.cache(cache.bytes != null ? bytes(cache.bytes) : cache.size || "–")),
+        h("span", { class: "ui-spacer" }),
+        btn(d.srv.cacheBtn, "trash", go, "ui-btn ui-outline ui-sm", { disabled: !cache.bytes })),
+      h("p", { class: "ui-muted ui-small" }, d.srv.cacheSafe), slot);
+  }
+
   // ---- Server
   function server() {
     const r = dash?.resources, tr = dash?.traefik, infra = dash?.infra;
@@ -1075,7 +1102,7 @@ export function mount(el, ctx) {
     const docker = card(d.srv.docker, "hard-drive", !dash?.disk_usage ? missing() : table(dc, dash.disk_usage.map((x) => h("tr", {},
       td(null, x.type || "–"), td(dc[1], h("span", { class: "ui-num" }, String(x.total ?? "–"))),
       td(dc[2], h("span", { class: "ui-num" }, String(x.active ?? "–"))), td(dc[3], h("span", { class: "ui-num" }, x.bytes != null ? bytes(x.bytes) : x.size || "–")),
-      td(dc[4], h("span", { class: "ui-num" }, x.reclaimable || "–"))))));
+      td(dc[4], h("span", { class: "ui-num" }, x.reclaimable || "–"))))), cacheTools());
     const srv = card(d.srv.servers, "network", !dash?.servers ? missing() : !dash.servers.length ? h("p", { class: "ui-muted" }, d.srv.noServers)
       : h("ul", { class: "dk-list" }, dash.servers.map((s) => h("li", {}, h("span", { class: "dk-ico" }, icon("server")),
         h("span", { class: "dk-grow" }, h("b", {}, s.name || "–"), h("span", { class: "dk-sub" }, [s.ip, s.type].filter(Boolean).join(" · "))),
