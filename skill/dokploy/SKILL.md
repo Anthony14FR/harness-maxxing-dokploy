@@ -14,6 +14,7 @@ D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D status                       # connected? (if not: the user opens the Dokploy page in Harness)
 python3 $D link-skill                   # when status says this skill is missing or a copy
 python3 $D updates [--json]            # what can be updated (read-only)
+python3 $D alerts --dry-run            # problems the alerts job would post (read-only)
 python3 $D list [--json]                # projects, apps, compose stacks, databases, their state and domains
 python3 $D environments [--json]        # environment ids, for app create
 python3 $D deployments APP [--json]     # newest first

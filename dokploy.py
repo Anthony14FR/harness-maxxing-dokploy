@@ -28,6 +28,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -90,6 +91,8 @@ def parser() -> argparse.ArgumentParser:
     for name in ("install-skill", "link-skill"):  # install-skill kept: 1.x instructions still work
         sub.add_parser(name, help="link the skill into the workspace, where Claude Code reads it")
     sub.add_parser("updates", help="what can be updated (read-only)").add_argument("--json", action="store_true")
+    al = sub.add_parser("alerts", help="post new Dokploy problems to the Harness feed (run by a Harness cron job)")
+    al.add_argument("--dry-run", action="store_true", help="print what would be posted, post nothing")
     for name, what in (
         ("list", "projects, apps, stacks, databases and their domains"),
         ("environments", "projects and environments, with the ids app create needs"),
@@ -169,11 +172,67 @@ def _urls(s: dict) -> str:
     )
 
 
+def language() -> str:
+    """Harness's interface language (its config.json), so feed alerts read like the rest of the app."""
+    try:
+        lang = json.loads(
+            (Path(os.environ.get("MAXXING_STATE") or "/var/lib/claude-maxxing") / "config.json").read_text()
+        )
+        return "fr" if str(lang.get("language", "")).startswith("fr") else "en"
+    except (OSError, ValueError, AttributeError):
+        return "en"
+
+
+def alerts(st: Path, dry_run: bool) -> int:
+    """New problems (and their end) to the feed; always exits 0 so the cron job's own history stays quiet."""
+    now = time.time()
+    try:
+        dash, err = core.dashboard(core.client(st, secret, timeout=8)), None
+    except core.DokployError as e:
+        if e.code in ("not_connected", "no_key", "key_changed"):
+            print(f"alerts skipped: {e.message}")
+            return 0
+        dash, err = None, e.message
+    if dash is not None and all(v is None for v in dash.values()):  # every read failed: Dokploy is away
+        dash, err = None, "no answer from Dokploy"
+    issues = core.alert_issues(dash, now, language(), err)
+    posts, nxt = core.alert_diff(core.load_alert_state(st), issues, now)
+    for p in posts:
+        if dry_run:
+            print(f"{p['level']:<8} {p['title']}  {p['body']}")
+            continue
+        r = _maxxing(
+            "feed",
+            "post",
+            p["title"],
+            "--body",
+            p["body"],
+            "--level",
+            p["level"],
+            "--source",
+            "Dokploy",
+            "--url",
+            "/x/dokploy",
+            "--dedupe",
+            f"dokploy:{p['key']}",
+            "--quiet",
+        )
+        if r.returncode != 0:
+            print(f"feed post failed: {(r.stderr or r.stdout).strip()[:200]}", file=sys.stderr)
+            return 0  # the state is kept as it was: the same posts are tried again next run
+    if not dry_run:
+        core.save_alert_state(st, nxt)
+    print(f"{len(issues)} problem(s) now, {len(posts)} post(s)")
+    return 0
+
+
 def run(a: argparse.Namespace) -> int:
     st = state_dir()
     if a.action in ("install-skill", "link-skill"):
         print(f"skill linked at {core.install_skill(workspace())}")
         return 0
+    if a.action == "alerts":
+        return alerts(st, a.dry_run)
     if a.action == "updates":
         res = {"extension": core.ext_check(core.EXT_DIR)}
         try:

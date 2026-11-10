@@ -117,6 +117,10 @@ const T = {
       dashFailed: "The dashboard could not be read, only the services are shown:",
       st: { done: "Done", error: "Failed", running: "In progress", idle: "Idle", queued: "Queued", cancelled: "Cancelled" },
       kind: { application: "app", compose: "compose", postgres: "PostgreSQL", mysql: "MySQL", mariadb: "MariaDB", mongo: "MongoDB", redis: "Redis", libsql: "libSQL" },
+      alerts: { title: "Alerts", badgeOn: "On", badgeOff: "Off", on: "On: every 5 minutes, new problems reach Harness notifications (and their end).", off: "Off: turn them on to get failed deployments and backups, services down, a full disk and Traefik errors in Harness notifications.",
+        how: "Telegram follows the rule of the Dokploy source in Settings → Notifications. A Harness cron job (Dokploy alerts) runs the check; it only reads Dokploy.",
+        enable: "Turn alerts on", disable: "Turn alerts off", runNow: "Check now", ran: "Check started: new problems appear in the notifications.", rules: "Notification settings",
+        last: (w, ok) => `Last check ${w}${ok ? "" : " (failed: see Settings → Crons)"}`, noCrons: (e) => `Harness cron jobs cannot be read: ${e}` },
     },
   },
   fr: {
@@ -233,6 +237,10 @@ const T = {
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommandée` : v), docker: "Espace disque Docker",
         dcols: ["Type", "Nombre", "Actifs", "Taille", "Récupérable"], servers: "Serveurs distants", noServers: "Uniquement ce serveur.",
         services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "Sain", outdated: "Mise à jour disponible", on: "Activée" },
+      alerts: { title: "Alertes", badgeOn: "Activées", badgeOff: "Désactivées", on: "Activées : toutes les 5 minutes, les nouveaux problèmes arrivent dans les notifications de Harness (puis leur résolution).", off: "Désactivées : activez-les pour recevoir dans les notifications de Harness les déploiements et sauvegardes en échec, les services en panne, un disque plein et les erreurs de Traefik.",
+        how: "Telegram suit la règle de la source Dokploy dans Réglages → Notifications. Une tâche cron de Harness (Dokploy alerts) fait la vérification ; elle ne fait que lire Dokploy.",
+        enable: "Activer les alertes", disable: "Désactiver les alertes", runNow: "Vérifier maintenant", ran: "Vérification lancée : les nouveaux problèmes apparaissent dans les notifications.", rules: "Réglages des notifications",
+        last: (w, ok) => `Dernière vérification ${w}${ok ? "" : " (échec : voir Réglages → Crons)"}`, noCrons: (e) => `Les tâches cron de Harness sont illisibles : ${e}` },
       dashFailed: "Le tableau de bord n’a pas pu être lu, seuls les services sont affichés :",
       st: { done: "Réussi", error: "En échec", running: "En cours", idle: "Inactif", queued: "En attente", cancelled: "Annulé" },
       kind: { application: "app", compose: "compose", postgres: "PostgreSQL", mysql: "MySQL", mariadb: "MariaDB", mongo: "MongoDB", redis: "Redis", libsql: "libSQL" },
@@ -655,6 +663,57 @@ export function mount(el, ctx) {
   let generation = 0;
   let services = [];   // project.all completed (the actions need it)
   let dash = null;     // the whole Dokploy at once (dashboard route)
+  let info = null;     // the status route: connection, skill, the extension's folder
+
+  // Harness's own documented API (docs/dev/API.md): signed-in cookie plus the CSRF header, like the app itself.
+  async function harness(path, opts = {}) {
+    const r = await fetch(`/api/${path}`, {
+      method: opts.method || "GET", credentials: "same-origin",
+      headers: { "X-Maxxing": "1", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data?.detail?.message || data?.message || `HTTP ${r.status}`);
+    return data;
+  }
+
+  // Alerts: a Harness cron job runs `dokploy.py alerts` every 5 minutes; this card only turns it on or off.
+  function alertsCard() {
+    const a = d.alerts;
+    const body = h("div", { class: "ui-stack", style: "gap:8px" }, h("span", { class: "ui-skeleton", style: "display:block;height:1.2em;width:60%" }));
+    const isMine = (j) => /dokploy\.py'? alerts\b/.test(String(j.command || ""));
+    const toggle = (job, on) => {
+      if (job) return harness(`crons/${encodeURIComponent(job.id)}`, { method: "PATCH", body: { enabled: on } });
+      const dir = String(info?.ext_dir || "/root/maxxing/extensions/dokploy").replace(/'/g, "");
+      return harness("crons", { method: "POST", body: { name: "Dokploy alerts", schedule: "*/5 * * * *", kind: "shell",
+        command: `python3 '${dir}/dokploy.py' alerts`, enabled: true, notify: "never", timeout_s: 120, catch_up: false } });
+    };
+    const draw = async () => {
+      let job;
+      try { job = ((await harness("crons")).jobs || []).find(isMine); } catch (e) {
+        if (alive) body.replaceChildren(h("p", { class: "ui-muted ui-small" }, a.noCrons(e.message)));
+        return;
+      }
+      if (!alive) return;
+      const on = !!job?.enabled;
+      const last = job?.last_run;
+      body.replaceChildren(
+        h("p", {}, h("span", { class: `ui-badge ${on ? "ui-success" : "ui-outline"}` }, on ? a.badgeOn : a.badgeOff), " ", on ? a.on : a.off),
+        h("p", { class: "ui-muted ui-small" }, a.how),
+        last?.at ? h("p", { class: "ui-muted ui-small" }, a.last(ago(new Date(last.at * 1000).toISOString()), last.ok)) : null,
+        h("div", { class: "dk-actions" },
+          btn(on ? a.disable : a.enable, on ? "x" : "bell", async () => {
+            try { await toggle(job, !on); } catch (e) { fail(e); }
+            draw();
+          }, on ? "ui-btn ui-outline ui-sm" : "ui-btn ui-sm"),
+          job && on ? btn(a.runNow, "refresh-cw", async () => {
+            try { await harness(`crons/${encodeURIComponent(job.id)}/run`, { method: "POST" }); say(a.ran, "ui-success"); } catch (e) { fail(e); }
+          }, "ui-btn ui-ghost ui-sm") : null,
+          btn(a.rules, "settings", () => ctx.navigate("/settings/notifications"), "ui-btn ui-ghost ui-sm")));
+    };
+    draw();
+    return card(a.title, "bell", body);
+  }
   const healthCache = new Map();
   let tab = TABS.some(([k]) => k === store.get("tab")) ? store.get("tab") : "overview";
   const panels = new Map();
@@ -766,7 +825,7 @@ export function mount(el, ctx) {
       dash?.deployments ? (dash.deployments.length ? h("ul", { class: "dk-list" }, dash.deployments.slice(0, 6).map(depItem)) : empty(d.dep.none))
         : missing(),
       dash?.deployments?.length ? h("div", {}, btn(d.seeAll, "arrow-right", () => select("deployments"), "ui-btn ui-ghost ui-sm")) : null);
-    return h("div", { class: "ui-stack" }, health, stats, h("div", { class: "dk-cols" }, res, recent));
+    return h("div", { class: "ui-stack" }, health, stats, h("div", { class: "dk-cols" }, res, recent), alertsCard());
   }
 
   function depItem(x) {
@@ -1038,7 +1097,7 @@ export function mount(el, ctx) {
     rendered.clear();
     body.replaceChildren(skeleton());
     try {
-      const st = await ctx.api("status");
+      const st = info = await ctx.api("status");
       if (!alive || mine !== generation) return;
       showSkill(st.skill);
       if (!st.connected) {
