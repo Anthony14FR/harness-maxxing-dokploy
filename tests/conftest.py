@@ -530,6 +530,7 @@ def _skill_copy(monkeypatch, tmp_path):
 def _no_real_state(monkeypatch, tmp_path):
     monkeypatch.setenv("MAXXING_STATE", str(tmp_path / "state"))
     monkeypatch.delenv("DOKPLOY_API_KEY", raising=False)
+    monkeypatch.setenv("DOKPLOY_NO_TLS_CHECK", "1")  # certificate checks: only against the tests' own TLS server
     (tmp_path / "state").mkdir(exist_ok=True)  # the CLI reads the workspace here: never the real /root/maxxing
     (tmp_path / "state" / "config.json").write_text(json.dumps({"workspace": str(tmp_path / "workspace")}))
     os.umask(0o022)

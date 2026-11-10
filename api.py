@@ -112,6 +112,10 @@ def handle(ctx, method, path, query, body):
             budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s in all, Dokploy reads included
             ext = core.ext_check(core.EXT_DIR, _supported_api(), budget=min(core.CHECK_BUDGET, budget))
             return {"extension": ext, "dokploy": dok, "traefik": trf, "harness": "/settings/updates"}
+        if path == "certificates" and method == "GET":  # served certificates of the HTTPS domains, checked now
+            dash = core.dashboard(core.client(state, secret, timeout=8))
+            hosts = [d["host"] for d in dash.get("domains") or [] if d.get("https") and d.get("enabled") is not False]
+            return {"certificates": core.check_certificates(state, hosts)}
         if path == "stats" and method == "GET":  # sampled every few seconds while the Server tab is open
             return core.live_stats(core.client(state, secret, timeout=10))
         if path == "traefik" and method == "GET":  # the page follows a Traefik update with it
