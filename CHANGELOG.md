@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0 - 2026-11-10
+
+- **Alerts in Harness notifications (and Telegram)**: Overview → **Alerts** → **Turn alerts on**. Every 5 minutes a
+  Harness cron job checks Dokploy and posts each new problem once, then its end: a failed deployment or backup, a
+  service down, a disk at 90 % or memory at 95 %, a failed Traefik update, Dokploy not answering. In the language of
+  Harness; Telegram follows the rule of the **Dokploy** source. It only reads Dokploy. `dokploy.py alerts --dry-run`
+  shows what would be posted.
+
 ## 1.5.0 - 2026-11-10
 
 - **Update Traefik from Harness**: when Dokploy recommends a newer Traefik, **Updates** (and the Server tab) offer

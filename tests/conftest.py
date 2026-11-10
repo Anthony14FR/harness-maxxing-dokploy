@@ -460,6 +460,9 @@ if a[:2] == ["keys", "get"]:
     print(k["value"]) if k else sys.exit(1)
 elif a[:2] == ["keys", "list"]:
     print(json.dumps([{{"name": n, "expose": x["expose"]}} for n, x in v.items()]))
+elif a[:2] == ["feed", "post"]:  # recorded, as Harness would add it to its feed
+    with open({str(tmp_path / "feed.jsonl")!r}, "a") as f:
+        f.write(json.dumps(a[2:]) + "\\n")
 """)
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
 

@@ -82,7 +82,11 @@ def handle(ctx, method, path, query, body):
     body = body if isinstance(body, dict) else {}
     try:
         if path == "status" and method == "GET":
-            return {**core.status(state, secret), "skill": core.skill_state(ctx.get("workspace"))}
+            return {
+                **core.status(state, secret),
+                "skill": core.skill_state(ctx.get("workspace")),
+                "ext_dir": str(core.EXT_DIR),
+            }
         if path == "skill" and method == "POST":  # the user's button: link the skill for Claude sessions
             if not ctx.get("workspace"):
                 return 409, {"error": "skill_failed", "message": "Harness gave no workspace"}

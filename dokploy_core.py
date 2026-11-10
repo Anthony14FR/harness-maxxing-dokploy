@@ -1285,3 +1285,150 @@ def deployment_log(c: Client, dep_id: str, lines: int = 300) -> dict:
     if not dep:
         raise DokployError("not_found", "no such deployment")
     return {"deployment": dep_id, "log": log({"log_path": dep.get("logPath")}, lines)}
+
+
+# Alerts: `dokploy.py alerts`, run by a Harness cron job, posts each new problem to the Harness feed once (then
+# "resolved" when it goes away). Ongoing problems are tracked in alerts.json; one-off ones (a failed deployment or
+# backup) by their id. Only the last ALERT_WINDOW of history counts, so turning alerts on never floods the feed.
+ALERT_WINDOW = 6 * 3600
+ALERT_SEEN_MAX = 300
+DISK_ALERT, MEM_ALERT = 90, 95
+ALERT_TEXT = {
+    "en": {
+        "deploy": "Deployment of {svc} failed",
+        "backup": "Backup of {svc} failed",
+        "down": "{svc} is down",
+        "down_body": "None of its containers runs, although its last deployment succeeded.",
+        "up": "{svc} is back up",
+        "disk": "Dokploy server disk {p}% full",
+        "disk_ok": "Dokploy server disk below {p}%",
+        "disk_body": "Free space on the Dokploy page, Server tab.",
+        "mem": "Dokploy server memory {p}% used",
+        "mem_ok": "Dokploy server memory below {p}%",
+        "traefik": "Traefik update failed",
+        "traefik_ok": "Traefik update error cleared",
+        "unreachable": "Dokploy does not answer",
+        "unreachable_ok": "Dokploy answers again",
+    },
+    "fr": {
+        "deploy": "Échec du déploiement de {svc}",
+        "backup": "Échec de la sauvegarde de {svc}",
+        "down": "{svc} est en panne",
+        "down_body": "Aucun de ses conteneurs ne tourne, alors que son dernier déploiement a réussi.",
+        "up": "{svc} fonctionne de nouveau",
+        "disk": "Disque du serveur Dokploy plein à {p} %",
+        "disk_ok": "Disque du serveur Dokploy sous les {p} %",
+        "disk_body": "Libérez de la place : page Dokploy, onglet Serveur.",
+        "mem": "Mémoire du serveur Dokploy utilisée à {p} %",
+        "mem_ok": "Mémoire du serveur Dokploy sous les {p} %",
+        "traefik": "Échec de la mise à jour de Traefik",
+        "traefik_ok": "Erreur de mise à jour de Traefik levée",
+        "unreachable": "Dokploy ne répond pas",
+        "unreachable_ok": "Dokploy répond de nouveau",
+    },
+}
+
+
+def _pct(used: Any, total: Any) -> int | None:
+    return (
+        round(used / total * 100)
+        if isinstance(used, int | float) and isinstance(total, int | float) and total
+        else None
+    )
+
+
+def alert_issues(dash: dict | None, now: float, lang: str = "en", error: str | None = None) -> dict[str, dict]:
+    """{key: {level, title, body, ok, once}} of what is wrong now, from a dashboard() result (None: unreachable)."""
+    tx = ALERT_TEXT.get(lang, ALERT_TEXT["en"])
+    out: dict[str, dict] = {}
+    if dash is None:
+        out["unreachable"] = {
+            "level": "error",
+            "title": tx["unreachable"],
+            "body": error or "",
+            "ok": tx["unreachable_ok"],
+        }
+        return out
+    for d in dash.get("deployments") or []:
+        if d.get("status") != "error" or now - _when(d.get("created")).timestamp() > ALERT_WINDOW:
+            continue
+        kind = "backup" if d.get("kind") == "backup" else "deploy"
+        svc = d.get("service") or d.get("title") or "?"
+        out[f"{kind}:{d.get('id')}"] = {
+            "level": "error",
+            "title": tx[kind].format(svc=svc),
+            "body": d.get("error") or "",
+            "once": True,
+        }
+    boxes = dash.get("containers")
+    for s in dash.get("services") or [] if boxes is not None else []:
+        kind, app = s.get("kind"), s.get("app_name")
+        if kind not in ("application", "compose") or s.get("status") != "done" or not app:
+            continue
+        mine = [b for b in boxes if _mine(str(b.get("name") or ""), app, kind)]
+        if (mine or kind == "application") and not any(b.get("state") == "running" for b in mine):
+            name = s.get("name") or app
+            out[f"down:{s.get('id')}"] = {
+                "level": "error",
+                "title": tx["down"].format(svc=name),
+                "body": tx["down_body"],
+                "ok": tx["up"].format(svc=name),
+            }
+    r = dash.get("resources") or {}
+    disk, mem = _pct(r.get("disk_used"), r.get("disk_total")), _pct(r.get("mem_used"), r.get("mem_total"))
+    if disk is not None and disk >= DISK_ALERT:
+        out["disk"] = {
+            "level": "warning",
+            "title": tx["disk"].format(p=disk),
+            "body": tx["disk_body"],
+            "ok": tx["disk_ok"].format(p=DISK_ALERT),
+        }
+    if mem is not None and mem >= MEM_ALERT:
+        out["mem"] = {
+            "level": "warning",
+            "title": tx["mem"].format(p=mem),
+            "body": "",
+            "ok": tx["mem_ok"].format(p=MEM_ALERT),
+        }
+    tr = dash.get("traefik") or {}
+    if tr.get("error") and not tr.get("updating"):
+        out["traefik"] = {"level": "warning", "title": tx["traefik"], "body": tr["error"], "ok": tx["traefik_ok"]}
+    return out
+
+
+def alert_diff(state: dict, issues: dict[str, dict], now: float) -> tuple[list[dict], dict]:
+    """Posts to make ({key, level, title, body}) and the next state: a new problem once, then its end once."""
+    active = dict(state.get("active") or {})
+    seen = list(state.get("seen") or [])
+    posts = []
+    for key, i in issues.items():
+        if i.get("once"):
+            if key not in seen:
+                posts.append({"key": key, "level": i["level"], "title": i["title"], "body": i["body"]})
+                seen.append(key)
+        elif key not in active:
+            posts.append({"key": f"{key}:{int(now)}", "level": i["level"], "title": i["title"], "body": i["body"]})
+            active[key] = {"since": now, "ok": i.get("ok") or ""}
+    for key in [k for k in active if k not in issues]:
+        ok = active.pop(key).get("ok")
+        if ok:
+            posts.append({"key": f"{key}:ok:{int(now)}", "level": "success", "title": ok, "body": ""})
+    return posts, {"active": active, "seen": seen[-ALERT_SEEN_MAX:]}
+
+
+def load_alert_state(state_dir: str | Path) -> dict:
+    f = Path(state_dir) / "alerts.json"
+    try:
+        s = json.loads(f.read_text())
+        return s if isinstance(s, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_alert_state(state_dir: str | Path, state: dict) -> None:
+    d = Path(state_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / f".alerts.{uuid.uuid4().hex}.tmp"
+    tmp.write_text(json.dumps(state))
+    os.chmod(tmp, 0o600)
+    tmp.replace(d / "alerts.json")

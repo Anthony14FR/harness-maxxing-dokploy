@@ -78,6 +78,21 @@ copy keeps working; the button (or `dokploy.py link-skill`, not `ln -s` over the
 makes the link and puts the copy back if anything fails. A folder holding your own files is left alone.
 </details>
 
+## Alerts
+
+Overview → **Alerts** → **Turn alerts on** creates a Harness cron job, **Dokploy alerts**, that runs
+`dokploy.py alerts` every 5 minutes. Each new problem reaches Harness notifications once, then its end once:
+
+| Problem | Level |
+|---|---|
+| A deployment or a backup failed (the last 6 hours) | error |
+| A service is down: none of its containers runs although its last deployment succeeded | error, then "back up" |
+| Disk at 90 % or more, memory at 95 % or more | warning, then "below" |
+| Traefik's last update failed; Dokploy does not answer | warning / error, then cleared |
+
+The check only reads Dokploy. Telegram follows the rule of the **Dokploy** source in Settings → Notifications. Turn
+alerts off from the same card (the job stays, disabled); `dokploy.py alerts --dry-run` prints what it would post.
+
 ## Update
 
 On the Dokploy page: **Updates → Check for updates**.
