@@ -22,6 +22,51 @@ def _core():
 core = _core()
 
 
+AUTO_PIN_DELAY = 5.0  # seconds after Harness loads this file: its scan must be over before the pin reads the registry
+
+
+def _auto_pin(ext_id: str, state_dir: Path) -> bool:
+    """Pins the page in the sidebar once, on its first load: never again after, so a user's unpin is kept."""
+    mark = state_dir / "auto-pinned"
+    if mark.exists():
+        return False
+    try:
+        from maxxing import extensions  # Harness's own module: absent outside Harness, may change in a later version
+
+        if ext_id not in extensions.pinned_ids() and not extensions.set_pinned(ext_id, True):
+            return False
+        state_dir.mkdir(parents=True, exist_ok=True)
+        mark.write_text("1\n")
+        with contextlib.suppress(Exception):  # open tabs redraw their sidebar now, as after the Settings switch
+            from maxxing import bus
+
+            bus.invalidate("extensions")
+        return True
+    except Exception:  # noqa: BLE001 - the README says how to pin it by hand
+        return False
+
+
+def _schedule_auto_pin() -> None:
+    if "maxxing.extensions" not in sys.modules:  # loaded by tests or the CLI, not by Harness
+        return
+    import os
+    import threading
+
+    ext_dir = Path(__file__).resolve().parent
+    try:
+        from maxxing import config  # the same folder Harness gives handle() as ctx["state_dir"]
+
+        state = Path(config.state_dir("extensions", ext_dir.name))
+    except Exception:  # noqa: BLE001
+        state = Path(os.environ.get("MAXXING_STATE") or "/var/lib/claude-maxxing") / "extensions" / ext_dir.name
+    t = threading.Timer(AUTO_PIN_DELAY, _auto_pin, (ext_dir.name, state))
+    t.daemon = True
+    t.start()
+
+
+_schedule_auto_pin()
+
+
 def _supported_api() -> int:
     """The extension contract this Harness runs (1 when it does not say)."""
     try:
@@ -73,7 +118,11 @@ def handle(ctx, method, path, query, body):
                 chk = core.dokploy_update(core.client(state, secret, timeout=8), to, state)
                 return {"updated": "dokploy", "version": chk["latest"]}
             return 400, {"error": "bad_target", "message": "what must be extension or dokploy"}
+        if path == "dashboard" and method == "GET":  # short timeout: 14 reads must fit in Harness's 30 s
+            return core.dashboard(core.client(state, secret, timeout=8))
         c = core.client(state, secret)
+        if path == "deployment-log" and method == "GET":
+            return core.deployment_log(c, str(query.get("id") or ""))
         if path == "services" and method == "GET":
             prot = core.protected(state)
             svcs = core.inventory(c)
@@ -137,6 +186,7 @@ def handle(ctx, method, path, query, body):
             "up_to_date": 409,
             "update_in_progress": 409,
             "not_found": 404,
+            "no_log": 404,
         }.get(e.code, 422)
         return status, {"error": e.code, "message": e.message}
     return 404, {"error": "not_found", "message": f"{method} {path}"}
