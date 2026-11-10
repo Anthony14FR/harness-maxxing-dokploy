@@ -105,7 +105,7 @@ def handle(ctx, method, path, query, body):
                 trf = core.traefik_check(core.client(state, secret, timeout=4))
             except core.DokployError as e:
                 trf = {"error_code": e.code, "message": e.message}
-            budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s in all, minus Dokploy and Traefik reads
+            budget = max(1.0, core.CHECK_BUDGET + 4 - (time.monotonic() - start))  # 26 s in all, Dokploy reads included
             ext = core.ext_check(core.EXT_DIR, _supported_api(), budget=min(core.CHECK_BUDGET, budget))
             return {"extension": ext, "dokploy": dok, "traefik": trf, "harness": "/settings/updates"}
         if path == "traefik" and method == "GET":  # the page follows a Traefik update with it
