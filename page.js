@@ -243,6 +243,7 @@ const CSS = `
 .dk .dk-tab{flex:none;display:inline-flex;align-items:center;gap:8px;padding:10px 12px;min-height:40px;border:0;background:none;color:var(--muted-foreground);
   font:inherit;font-size:14px;font-weight:500;white-space:nowrap;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:6px 6px 0 0}
 .dk .dk-tab:hover{color:var(--foreground)}
+.dk .dk-tab{scroll-margin-top:72px}
 .dk .dk-tab[aria-selected="true"]{color:var(--foreground);border-bottom-color:var(--primary)}
 .dk .dk-tab:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .dk .dk-tab svg,.dk .dk-ico svg{width:16px;height:16px;flex:none}
@@ -499,7 +500,7 @@ export function mount(el, ctx) {
     const slot = h("div");
     const label = (long, short) => [h("span", { class: "dk-long" }, long), h("span", { class: "dk-short", "aria-hidden": "true" }, short)];
     const b = h("button", { class: "ui-btn ui-outline ui-sm", type: "button", onclick: check, "aria-label": u.check }, icon("refresh-cw"), label(u.check, u.checkShort));
-    const setLabel = (long, short) => b.replaceChildren(icon("refresh-cw"), label(long, short));
+    const setLabel = (long, short) => { b.replaceChildren(icon("refresh-cw"), label(long, short)); b.setAttribute("aria-label", long); };
     const line = h("span", { class: "ui-muted ui-small dk-grow" }, u.lead);
     updates.replaceChildren(h("div", { class: "dk-upd" },
       h("span", { class: "ui-icon-box ui-neutral" }, icon("download")),
