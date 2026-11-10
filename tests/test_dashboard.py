@@ -237,3 +237,25 @@ def test_an_older_dokploy_uses_its_own_builder_cleanup(api, fake, state, monkeyp
     monkeypatch.setitem(DASH, "settings.cleanDockerBuilder", True)  # no pruneBuildCache: 404 then the old name
     api.handle(ctx(state), "POST", "cleanup", {}, {"what": "build-cache"})
     assert ("POST", "settings.cleanDockerBuilder", {}) in fake.calls
+
+
+def test_container_logs_per_kind(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    r = api.handle(ctx(state), "GET", "container-log", {"id": "a1", "since": "1h", "search": "GET"}, None)
+    assert "***@git.example.com" in r["log"] and "tok" not in r["log"]  # URL credentials masked
+    call = next(d for m, p, d in fake.calls if p == "application.readLogs")
+    assert call == {"applicationId": "a1", "tail": "200", "since": "1h", "search": "GET"}
+    r = api.handle(ctx(state), "GET", "container-log", {"id": "c1"}, None)
+    assert r["container"] == "2" and {b["id"] for b in r["containers"]} == {"2", "3", "4"}  # its own, running first
+    assert api.handle(ctx(state), "GET", "container-log", {"id": "pg1"}, None)["log"] == "database system is ready\n"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [{"container": "5"}, {"container": "x;rm"}, {"since": "yesterday"}, {"search": "a|b"}, {"lines": "many"}],
+)
+def test_container_logs_refuse_bad_values(api, fake, state, query):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    code, err = api.handle(ctx(state), "GET", "container-log", {"id": "c1", **query}, None)  # 5: another stack's
+    assert (code, err["error"]) == (400, "bad_value")
+    assert not [p for _, p, _ in fake.calls if p.endswith("readLogs")]

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.0 - 2026-11-10
+
+- **Live logs**: Services → **Logs** shows what a service's container prints now: apps, stacks (pick the container)
+  and databases, over 15 minutes to everything, with a search, and **Follow** to read it again every 3 seconds. The
+  deployment log moved to the **More** menu. `dokploy.py container-logs APP` gives the same to sessions (read only).
+  Credentials in URLs are masked.
+
 ## 1.7.0 - 2026-11-10
 
 - **Free disk space safely**: Server → Docker disk usage → **Clear the build cache**. Only Docker's build cache is

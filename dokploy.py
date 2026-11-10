@@ -117,6 +117,12 @@ def parser() -> argparse.ArgumentParser:
     hp = sub.add_parser("health", help="containers really running, not the last deployment")
     hp.add_argument("app")
     hp.add_argument("--json", action="store_true")
+    cl = sub.add_parser("container-logs", help="what the service's container prints now (read only)")
+    cl.add_argument("app")
+    cl.add_argument("--container", help="compose stack: a container id from health --json")
+    cl.add_argument("--lines", type=int, default=200)
+    cl.add_argument("--since", default="all", help="all, or 10m, 2h, 1d")
+    cl.add_argument("--search", default="")
     lg = sub.add_parser("logs", help="log of the last (or a given) deployment")
     lg.add_argument("app")
     lg.add_argument("--deployment")
@@ -363,6 +369,12 @@ def run(a: argparse.Namespace) -> int:
             print(json.dumps([{k: v for k, v in d.items() if k != "log_path"} for d in deps], indent=2))
         for d in [] if a.json else deps:
             print(f"{(d['status'] or '-'):<8} {d['created'] or '':<26} {d['id']:<24} {d['title'] or ''}")
+        return 0
+    if a.action == "container-logs":
+        r = core.container_logs(c, svc, a.container, a.lines, a.since, a.search)
+        if r["containers"]:
+            print(f"# container {r['container']} (of: {', '.join(b['id'] for b in r['containers'])})")
+        print(r["log"].rstrip())
         return 0
     if a.action == "logs":
         deps = core.deployments(c, svc)

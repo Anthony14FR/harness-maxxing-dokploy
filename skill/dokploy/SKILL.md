@@ -20,6 +20,7 @@ python3 $D environments [--json]        # environment ids, for app create
 python3 $D deployments APP [--json]     # newest first
 python3 $D health APP [--json]          # containers really running: check this, not the list, for "is it up?"
 python3 $D logs APP [--deployment ID] [--lines N]
+python3 $D container-logs APP [--container ID] [--lines N] [--since 1h] [--search TEXT]
 python3 $D domain list APP
 python3 $D deploy APP --yes             # or redeploy (rebuild)
 python3 $D stop|start APP --yes         # its containers, nothing rebuilt

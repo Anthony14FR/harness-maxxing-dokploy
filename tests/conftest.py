@@ -227,6 +227,9 @@ DASH = {
     ],
     "deployment.queueList": [{"id": "q1"}],
     "settings.updateTraefik": True,
+    "application.readLogs": "GET / 200\nclone https://bot:tok@git.example.com/acme/web\n",
+    "compose.readLogs": "nginx started\n",
+    "postgres.readLogs": "database system is ready\n",
     "docker.getContainers": [
         {
             "containerId": "2",
