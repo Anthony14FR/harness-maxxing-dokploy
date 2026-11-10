@@ -154,7 +154,32 @@ DASH = {
             "projectName": "acme",
             "environmentName": "production",
         },
+        {"id": "pg1", "name": "db", "appName": "acme-db", "type": "postgres", "status": "done", "projectName": "acme"},
     ],
+    # a database's own backups (overview.backups can be empty while they exist); its destination holds the S3 keys
+    "postgres.one": {
+        "postgresId": "pg1",
+        "backups": [
+            {
+                "backupId": "b2",
+                "schedule": "0 4 * * *",
+                "enabled": True,
+                "database": "shop",
+                "databaseType": "postgres",
+                "backupType": "database",
+                "keepLatestCount": 3,
+                "destination": {"name": "offsite", "secretAccessKey": "leak-dest-secret", "accessKey": "leak-dest-key"},
+                "deployments": [{"status": "done", "createdAt": "2026-11-09T04:00:00Z"}],
+            }
+        ],
+    },
+    "backup.one": {
+        "backupId": "b2",
+        "databaseType": "postgres",
+        "backupType": "database",
+        "destination": {"secretAccessKey": "leak-dest-secret"},
+    },
+    "backup.manualBackupPostgres": True,
     "overview.domains": [
         {
             "host": "web.example.com",

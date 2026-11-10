@@ -33,7 +33,7 @@ flowchart LR
     (`running 2/2`, `partly down`, `down`), its domains and its actions; search and a Problems filter; **Logs**: what
     its container prints now (pick the container of a stack, a period, a search, **Follow** every 3 s);
   - **Domains**: every domain, HTTPS or not, its certificate, and the ones a compose routes with its own Traefik labels;
-  - **Databases**: their containers and their backups (schedule, last run);
+  - **Databases**: their containers and their backups (schedule, last run, destination), with **Back up now**;
   - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
   - **Server**: resources, Dokploy's database and Traefik (version, update available), public IP, Docker disk usage,
     remote servers, and **Clear the build cache**: the only cleanup offered (`docker builder prune`, refused while a
@@ -165,11 +165,12 @@ validated first.
 - Dashboard reads: `project.homeStats`, `docker.getServerHealth`, `docker.getContainers`,
   `settings.checkInfrastructureHealth`, `settings.getTraefikOverview`, `settings.getIp`, `settings.getDockerDiskUsage`,
   `settings.getLogCleanupStatus`, `server.all`, `overview.services`, `overview.domains`, `overview.backups`,
-  `deployment.allCentralized`, `deployment.queueList`, and for **Logs** `application.readLogs`, `compose.readLogs`
+  `deployment.allCentralized`, `deployment.queueList`, `<database>.one` (its backups; their destination keeps only
+  its name), `backup.one`, and for **Logs** `application.readLogs`, `compose.readLogs`
   (one of the stack's own containers only) and `<database>.readLogs`. Only listed plain fields are kept: nested objects (where Dokploy
   puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets
   (web server settings, certificates, destinations, ssh keys) are never called.
-- Writes, each after you agree: `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
+- Writes, each after you agree: `backup.manualBackup<Postgres|MySql|Mariadb|Mongo|Libsql|Compose>`, `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
   `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
 - Updates: `settings.getDokployVersion`, `settings.getUpdateData`, `settings.getTraefikOverview`, and after you confirm
