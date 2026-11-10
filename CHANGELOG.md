@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.1 - 2026-11-10
+
+- **Statuses start with a capital**: Done / Réussi, Running 2/2 / En marche 2/2, Failed / En échec, Healthy / Sain...
+- **A finer phone layout** (checked at 320, 375 and 430 px): on a narrow screen the tabs other than the open one show
+  only their icon (their name stays for screen readers), so all six fit; counters stay two per row; Server and Overview
+  cards no longer overflow; service cards share their width between Deploy, Last log and More; deployments start
+  with their service; links get a 44 px touch area; the updates strip fits on one line ("Check"); shorter search hints.
+  The French "Vue d'ensemble" tab is now "Aperçu".
+
 ## 1.4.0 - 2026-11-10
 
 - **A full Dokploy dashboard**: updates on top, then Overview (what needs attention, counters, CPU / memory / disk,
