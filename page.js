@@ -15,7 +15,7 @@ const T = {
     keyChanged: "DOKPLOY_API_KEY changed in Settings -> Keys: check it again before it is used.",
     url: "Dokploy address", check: "Check and connect", disconnect: "Disconnect", refresh: "Refresh",
     connected: "Connected to", projects: "projects", empty: "Nothing in Dokploy yet.",
-    deploy: "Deploy", redeploy: "Rebuild", logs: "Last log", close: "Close",
+    deploy: "Deploy", redeploy: "Rebuild", logs: "Last log", deployLog: "Last deployment log", close: "Close",
     confirmDeploy: (n) => `Deploy ${n} now?`, confirmRedeploy: (n) => `Rebuild and redeploy ${n} now?`,
     started: (n) => `Deployment of ${n} started.`, noLog: "No deployment yet.",
     upd: {
@@ -105,6 +105,8 @@ const T = {
       filter: { all: "All", problems: "Problems", failed: "Failed", running: "In progress" },
       noMatch: "Nothing matches.",
       more: "More", logsOf: (n) => `Logs of ${n}`,
+      live: { btn: "Logs", title: (n) => `Logs of ${n}`, follow: "Follow", since: "Since", search: "Search the logs", container: "Container",
+        empty: "Nothing printed in this period.", ranges: [["15m", "15 min"], ["1h", "1 hour"], ["24h", "24 hours"], ["all", "Everything"]] },
       dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "Disabled", none: "No domain yet." },
       db: { title: "Databases", backups: "Backups", none: "No database in Dokploy.", noBackup: "No backup scheduled: add one in Dokploy (a destination is needed).",
         cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active"],
@@ -141,7 +143,7 @@ const T = {
     keyChanged: "DOKPLOY_API_KEY a changé dans Réglages -> Clés : vérifiez-la à nouveau avant qu’elle serve.",
     url: "Adresse de Dokploy", check: "Vérifier et connecter", disconnect: "Déconnecter", refresh: "Actualiser",
     connected: "Connecté à", projects: "projets", empty: "Rien dans Dokploy pour l’instant.",
-    deploy: "Déployer", redeploy: "Reconstruire", logs: "Dernier log", close: "Fermer",
+    deploy: "Déployer", redeploy: "Reconstruire", logs: "Dernier log", deployLog: "Log du dernier déploiement", close: "Fermer",
     confirmDeploy: (n) => `Déployer ${n} maintenant ?`, confirmRedeploy: (n) => `Reconstruire et redéployer ${n} maintenant ?`,
     started: (n) => `Déploiement de ${n} lancé.`, noLog: "Aucun déploiement pour l’instant.",
     upd: {
@@ -231,6 +233,8 @@ const T = {
       filter: { all: "Tous", problems: "Problèmes", failed: "En échec", running: "En cours" },
       noMatch: "Aucun résultat.",
       more: "Plus", logsOf: (n) => `Logs de ${n}`,
+      live: { btn: "Logs", title: (n) => `Logs de ${n}`, follow: "Suivre", since: "Depuis", search: "Rechercher dans les logs", container: "Conteneur",
+        empty: "Rien d’affiché sur cette période.", ranges: [["15m", "15 min"], ["1h", "1 heure"], ["24h", "24 heures"], ["all", "Tout"]] },
       dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "Désactivé", none: "Aucun domaine pour l’instant." },
       db: { title: "Bases de données", backups: "Sauvegardes", none: "Aucune base de données dans Dokploy.", noBackup: "Aucune sauvegarde planifiée : ajoutez-en une dans Dokploy (il faut une destination).",
         cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active"],
@@ -323,6 +327,8 @@ const CSS = `
 .dk .dk-upd{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .dk .dk-upd .dk-grow{flex:1 1 260px}
 .dk .dk-short{display:none}
+.dk .dk-log{max-height:420px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.45;margin:0}
+.dk .dk-follow{display:inline-flex;align-items:center;gap:6px;font-size:13px;min-height:36px;cursor:pointer}
 .dk .dk-md{max-height:260px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--muted);font-size:13px;line-height:1.5}
 .dk .dk-md>:first-child{margin-top:0}
 .dk .dk-md-h{margin:12px 0 4px;font-size:13px;font-weight:600}
@@ -533,6 +539,51 @@ export function mount(el, ctx) {
     const closeBtn = btn(t.close, "x", close, "ui-btn ui-ghost ui-sm");
     queueMicrotask(() => closeBtn.focus());
     return h("div", { class: "ui-card ui-stack" }, h("div", { class: "ui-row" }, h("b", {}, title), h("span", { class: "ui-spacer" }), closeBtn), pre);
+  }
+
+  // What the container prints now; Follow reads it again every 3 s while the panel is open (and stays at the bottom).
+  function liveLogPanel(svc, close) {
+    const L = d.live;
+    const pre = h("pre", { class: "ui-code dk-log", tabindex: "0", "aria-label": L.title(svc.name) }, "…");
+    const since = h("select", { class: "ui-select", "aria-label": L.since },
+      L.ranges.map(([v, label]) => h("option", { value: v, selected: v === "24h" }, label)));
+    const search = h("input", { class: "ui-input", type: "search", maxlength: "100", placeholder: L.search, "aria-label": L.search });
+    const pick = h("select", { class: "ui-select", "aria-label": L.container, hidden: true });
+    const follow = h("input", { type: "checkbox", class: "ui-check" });
+    let timer = null, busy = false, first = true, wait = null;
+    const stop = () => { clearInterval(timer); timer = null; };
+    const read = async () => {
+      if (!alive || (!first && !pre.isConnected)) return stop();
+      if (busy) return;
+      busy = true;
+      const q = new URLSearchParams({ id: svc.id, lines: "300", since: since.value });
+      if (search.value.trim()) q.set("search", search.value.trim());
+      if (pick.value) q.set("container", pick.value);
+      try {
+        const r = await ctx.api(`container-log?${q}`);
+        if (!alive) return;
+        const atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+        pre.textContent = r.log || L.empty;
+        if (r.containers?.length && !pick.options.length) {
+          pick.replaceChildren(...r.containers.map((b) => h("option", { value: b.id }, `${b.name} (${t.health[b.state === "running" ? "ok" : "down"] || b.state})`)));
+          pick.hidden = false;
+        }
+        if (r.container) pick.value = r.container;
+        if (first || atEnd) pre.scrollTop = pre.scrollHeight;
+      } catch (e) { pre.textContent = e.message; }
+      busy = false;
+      first = false;
+    };
+    follow.addEventListener("change", () => { stop(); if (follow.checked) { read(); timer = setInterval(read, 3000); } });
+    since.addEventListener("change", read);
+    pick.addEventListener("change", read);
+    search.addEventListener("input", () => { clearTimeout(wait); wait = setTimeout(read, 400); });
+    const closeBtn = btn(t.close, "x", () => { stop(); close(); }, "ui-btn ui-ghost ui-sm");
+    queueMicrotask(() => closeBtn.focus());
+    read();
+    return h("div", { class: "ui-card ui-stack" },
+      h("div", { class: "ui-row" }, h("b", {}, L.title(svc.name)), h("span", { class: "ui-spacer" }), closeBtn),
+      h("div", { class: "dk-tools" }, pick, since, search, h("label", { class: "dk-follow" }, follow, " ", L.follow)), pre);
   }
 
   // Inline confirmation: a possible downtime asks to type the service name, never a single OK.
@@ -914,6 +965,7 @@ export function mount(el, ctx) {
       const more = deployable ? h("details", { class: "dk-more" },
         h("summary", { class: "ui-btn ui-ghost ui-sm", "aria-label": `${d.more}: ${s.name}` }, d.more),
         h("div", { class: "dk-menu", role: "group", "aria-label": s.name },
+          btn(t.deployLog, "file-text", () => slot.replaceChildren(logPanel(d.logsOf(s.name), `log?id=${encodeURIComponent(s.id)}`, close)), "ui-btn ui-ghost ui-sm"),
           !s.protected ? [
             btn(t.redeploy, "hammer", () => deploy(s, true), "ui-btn ui-ghost ui-sm"),
             s.kind === "application" && s.rollback_active ? btn(t.rollback, "refresh-cw", () => act(s, "rollback"), "ui-btn ui-ghost ui-sm") : null,
@@ -942,10 +994,10 @@ export function mount(el, ctx) {
         td(t.cols[0], status(last)),
         boxes,
         domCell,
-        td(null, deployable ? h("div", { class: "dk-actions" },
-          !s.protected ? btn(t.deploy, "rocket", () => deploy(s, false), "ui-btn ui-sm") : null,
-          btn(t.logs, "file-text", () => slot.replaceChildren(logPanel(d.logsOf(s.name), `log?id=${encodeURIComponent(s.id)}`, close)), "ui-btn ui-outline ui-sm"),
-          more) : null));
+        td(null, h("div", { class: "dk-actions" },
+          deployable && !s.protected ? btn(t.deploy, "rocket", () => deploy(s, false), "ui-btn ui-sm") : null,
+          btn(d.live.btn, "terminal", () => slot.replaceChildren(liveLogPanel(s, close)), "ui-btn ui-outline ui-sm"),
+          more)));
     };
     const rows = services.map((s) => [s, row(s)]);
     next(); next(); next(); next();

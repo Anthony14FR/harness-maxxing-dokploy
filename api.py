@@ -138,6 +138,20 @@ def handle(ctx, method, path, query, body):
             if body.get("what") != "build-cache":
                 return 400, {"error": "bad_target", "message": "only the build cache can be cleared from here"}
             return core.clear_build_cache(core.client(state, secret, timeout=25))
+        if path == "container-log" and method == "GET":  # what the container prints now (read only)
+            svc = core.lookup(c, str(query.get("id") or ""))
+            try:
+                lines = int(query.get("lines") or 200)
+            except ValueError:
+                return 400, {"error": "bad_value", "message": "lines must be a number"}
+            return core.container_logs(
+                c,
+                svc,
+                query.get("container") or None,
+                lines,
+                str(query.get("since") or "all"),
+                str(query.get("search") or ""),
+            )
         if path == "deployment-log" and method == "GET":
             return core.deployment_log(c, str(query.get("id") or ""))
         if path == "services" and method == "GET":
@@ -190,6 +204,7 @@ def handle(ctx, method, path, query, body):
             "key_changed": 409,
             "protected": 409,
             "bad_settings": 409,
+            "bad_value": 400,
             "rollback_off": 409,
             "no_rollback": 409,
             "not_supported": 409,

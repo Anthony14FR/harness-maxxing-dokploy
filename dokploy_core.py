@@ -1006,6 +1006,7 @@ def health(c: Client, svc: dict) -> dict:
     rows = [r for r in rows if isinstance(r, dict) and _mine(str(r.get("name") or ""), app, svc["kind"])]
     boxes = [
         {"name": str(r.get("name") or ""), "state": r.get("state"), "status": r.get("status") or r.get("currentState")}
+        | ({"id": str(r["containerId"])} if r.get("containerId") else {})
         for r in rows
     ]
     if stack:  # swarm keeps old tasks: a slot (service.N) is up when one of its tasks runs
@@ -1460,3 +1461,46 @@ def clear_build_cache(c: Client) -> dict:
     after = _build_cache_bytes(c)
     freed = before - after if before is not None and after is not None and before >= after else None
     return {"before": before, "after": after, "freed": freed}
+
+
+# Live logs of a service's containers (not of a deployment): Dokploy's <kind>.readLogs, parameters checked against
+# the same patterns Dokploy enforces, and a compose stack's container only when it belongs to that stack.
+LOG_SINCE_RE = re.compile(r"^(all|\d{1,4}[smhd])$")
+LOG_SEARCH_RE = re.compile(r"^[a-zA-Z0-9 ._-]{0,100}$")
+CONTAINER_RE = re.compile(r"^[a-zA-Z0-9.\-_]{1,128}$")
+LIVE_LOG_MAX = 2000
+
+
+def container_logs(
+    c: Client, svc: dict, container: str | None = None, lines: int = 200, since: str = "all", search: str = ""
+) -> dict:
+    """{log, container, containers}: the tail of what the service's container prints now."""
+    kind = svc["kind"]
+    if kind not in _ID:
+        raise DokployError("not_supported", f"{kind} has no container logs here")
+    since, search = since or "all", (search or "").strip()
+    if not LOG_SINCE_RE.match(since):
+        raise DokployError("bad_value", "since must be all or a number with s, m, h or d (10m, 2h, 1d)")
+    if not LOG_SEARCH_RE.match(search):
+        raise DokployError("bad_value", "search takes letters, digits, spaces and . _ - only (up to 100)")
+    params: dict = {
+        "tail": max(1, min(int(lines), LIVE_LOG_MAX)),
+        "since": since,
+        **({"search": search} if search else {}),
+    }
+    boxes: list[dict] = []
+    if kind == "compose":
+        boxes = [b for b in health(c, svc)["containers"] if b.get("id")]
+        ids = {b["id"] for b in boxes}
+        if container and (not CONTAINER_RE.match(container) or container not in ids):
+            raise DokployError("bad_value", "that container is not one of this stack's")
+        container = (
+            container
+            or next((b["id"] for b in boxes if b.get("state") == "running"), None)
+            or (boxes[0]["id"] if boxes else None)
+        )
+        if not container:
+            raise DokployError("not_found", "this stack has no container to read")
+        params["containerId"] = container
+    text = c.get(f"{kind}.readLogs", {_ID[kind]: svc["id"], **params})
+    return {"log": redact(text if isinstance(text, str) else ""), "container": container, "containers": boxes}

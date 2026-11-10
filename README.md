@@ -30,7 +30,8 @@ flowchart LR
   - **Overview**: what needs your attention (failed deployments, disk or memory almost full, HTTP-only domains,
     queue), counters, CPU / memory / disk, recent deployments;
   - **Services**: every app, stack and database with its last deployment, the containers really running
-    (`running 2/2`, `partly down`, `down`), its domains and its actions; search and a Problems filter;
+    (`running 2/2`, `partly down`, `down`), its domains and its actions; search and a Problems filter; **Logs**: what
+    its container prints now (pick the container of a stack, a period, a search, **Follow** every 3 s);
   - **Domains**: every domain, HTTPS or not, its certificate, and the ones a compose routes with its own Traefik labels;
   - **Databases**: their containers and their backups (schedule, last run);
   - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
@@ -116,6 +117,7 @@ D=/root/maxxing/extensions/dokploy/dokploy.py
 python3 $D list                     # everything, with last deployment and domains
 python3 $D health APP               # containers really running + routed hosts
 python3 $D logs APP                 # last deployment log
+python3 $D container-logs APP       # what its container prints now (--since 1h --search TEXT)
 python3 $D deploy APP --yes         # every write needs --yes, added only after you agreed
 ```
 
@@ -127,6 +129,7 @@ python3 $D status | link-skill | updates [--json]
 python3 $D list | environments [--json]
 python3 $D deployments | health APP [--json]
 python3 $D logs APP [--deployment ID] [--lines N]
+python3 $D container-logs APP [--container ID] [--lines N] [--since 1h] [--search TEXT]
 python3 $D domain list APP
 python3 $D deploy | redeploy | stop | start | rollback APP --yes
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
@@ -162,7 +165,8 @@ validated first.
 - Dashboard reads: `project.homeStats`, `docker.getServerHealth`, `docker.getContainers`,
   `settings.checkInfrastructureHealth`, `settings.getTraefikOverview`, `settings.getIp`, `settings.getDockerDiskUsage`,
   `settings.getLogCleanupStatus`, `server.all`, `overview.services`, `overview.domains`, `overview.backups`,
-  `deployment.allCentralized`, `deployment.queueList`. Only listed plain fields are kept: nested objects (where Dokploy
+  `deployment.allCentralized`, `deployment.queueList`, and for **Logs** `application.readLogs`, `compose.readLogs`
+  (one of the stack's own containers only) and `<database>.readLogs`. Only listed plain fields are kept: nested objects (where Dokploy
   puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets
   (web server settings, certificates, destinations, ssh keys) are never called.
 - Writes, each after you agree: `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
