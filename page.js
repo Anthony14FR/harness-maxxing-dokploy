@@ -65,6 +65,7 @@ const T = {
       dokploy_away: "Your sites stay up: Traefik and the apps keep running. Dokploy's own page and API are away for about 2 minutes.",
       traefik_restart: "Dokploy recreates Traefik, which serves all your sites: they can be unreachable for a few seconds. Its environment and ports are kept; if the update fails, Dokploy keeps the previous version.",
       cache_only: "Only Docker's build cache is deleted: the next builds take longer, nothing else changes. Volumes (your data), images (what a rollback starts again), containers and databases are never touched.",
+      backup_run: "A dump of the database is made now and sent to the backup's destination; the database keeps running.",
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
@@ -109,8 +110,9 @@ const T = {
         empty: "Nothing printed in this period.", ranges: [["15m", "15 min"], ["1h", "1 hour"], ["24h", "24 hours"], ["all", "Everything"]] },
       dom: { cols: ["Domain", "Service", "Project", "HTTPS", "Certificate", "Source"], dokploy: "Dokploy", labels: "Traefik labels", off: "off", disabled: "Disabled", none: "No domain yet." },
       db: { title: "Databases", backups: "Backups", none: "No database in Dokploy.", noBackup: "No backup scheduled: add one in Dokploy (a destination is needed).",
-        cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active"],
-        keep: (n) => (n ? `${n} latest` : "all"), never: "never run" },
+        cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active", ""],
+        keep: (n) => (n ? `${n} latest` : "all"), never: "never run", run: "Back up now", runQ: (n) => `Back up ${n} now?`,
+        runDone: (n) => `Backup of ${n} done: it is on its destination.`, runStarted: (n) => `Backup of ${n} started: it goes on in Dokploy.`, to: (x) => `to ${x}` },
       dep: { cols: ["Service", "Status", "Deployment", "When", "Duration", ""], log: "Log", none: "No deployment yet.", backup: "backup", schedule: "scheduled job",
         queue: (n) => `${n} in the queue` },
       srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `On (${c})`, off: "Off",
@@ -193,6 +195,7 @@ const T = {
       dokploy_away: "Vos sites restent en ligne : Traefik et les apps continuent de tourner. La page et l’API de Dokploy sont absentes 2 minutes environ.",
       traefik_restart: "Dokploy recrée Traefik, qui sert tous vos sites : ils peuvent être injoignables quelques secondes. Ses variables d’environnement et ses ports sont gardés ; si la mise à jour échoue, Dokploy garde l’ancienne version.",
       cache_only: "Seul le cache de build de Docker est supprimé : les prochains builds sont plus longs, rien d’autre ne change. Les volumes (vos données), les images (ce qu’un retour arrière relance), les conteneurs et les bases ne sont jamais touchés.",
+      backup_run: "Une copie de la base est faite maintenant et envoyée vers la destination de la sauvegarde ; la base continue de tourner.",
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
@@ -237,8 +240,9 @@ const T = {
         empty: "Rien d’affiché sur cette période.", ranges: [["15m", "15 min"], ["1h", "1 heure"], ["24h", "24 heures"], ["all", "Tout"]] },
       dom: { cols: ["Domaine", "Service", "Projet", "HTTPS", "Certificat", "Source"], dokploy: "Dokploy", labels: "Labels Traefik", off: "non", disabled: "Désactivé", none: "Aucun domaine pour l’instant." },
       db: { title: "Bases de données", backups: "Sauvegardes", none: "Aucune base de données dans Dokploy.", noBackup: "Aucune sauvegarde planifiée : ajoutez-en une dans Dokploy (il faut une destination).",
-        cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active"],
-        keep: (n) => (n ? `${n} dernières` : "toutes"), never: "jamais exécutée" },
+        cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active", ""],
+        keep: (n) => (n ? `${n} dernières` : "toutes"), never: "jamais exécutée", run: "Sauvegarder maintenant", runQ: (n) => `Sauvegarder ${n} maintenant ?`,
+        runDone: (n) => `Sauvegarde de ${n} faite : elle est sur sa destination.`, runStarted: (n) => `Sauvegarde de ${n} lancée : elle continue dans Dokploy.`, to: (x) => `vers ${x}` },
       dep: { cols: ["Service", "Statut", "Déploiement", "Quand", "Durée", ""], log: "Log", none: "Aucun déploiement pour l’instant.", backup: "sauvegarde", schedule: "tâche planifiée",
         queue: (n) => `${n} en attente` },
       srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `Activé (${c})`, off: "Désactivé",
@@ -1075,8 +1079,22 @@ export function mount(el, ctx) {
       td(bc[2], b.schedule ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, b.schedule) : "–"),
       td(bc[3], d.db.keep(b.keep)),
       td(bc[4], b.last_run ? [status(b.last_run.status), " ", h("time", { class: "ui-muted ui-small", title: full(b.last_run.at) }, ago(b.last_run.at))] : h("span", { class: "ui-muted" }, d.db.never)),
-      td(bc[5], b.enabled === false ? h("span", { class: "ui-badge ui-outline" }, d.srv.off) : h("span", { class: "ui-badge ui-success" }, icon("check"), " ", d.srv.on)))));
-    return h("div", { class: "ui-stack" }, card(d.db.title, "database", list), card(d.db.backups, "database-backup", backups));
+      td(bc[5], b.enabled === false ? h("span", { class: "ui-badge ui-outline" }, d.srv.off) : h("span", { class: "ui-badge ui-success" }, icon("check"), " ", d.srv.on)),
+      td(null, b.id ? h("div", { class: "dk-actions" }, btn(d.db.run, "database-backup", () => runBackup(b), "ui-btn ui-outline ui-sm"),
+        b.destination ? h("span", { class: "dk-sub" }, d.db.to(b.destination)) : null) : null))));
+    const slot = h("div");
+    const runBackup = (b) => {  // a dump now, to the backup's own destination, after the user confirmed
+      const name = b.service || b.database || "backup";
+      slot.replaceChildren(confirmPanel({ name }, d.db.runQ(name), async () => {
+        say(d.db.runStarted(name), "ui-info");
+        try {
+          const r = await ctx.api("backup", { method: "POST", body: { id: b.id } });
+          say(r.done ? d.db.runDone(name) : d.db.runStarted(name), "ui-success");
+          load();
+        } catch (e) { fail(e); }
+      }, () => slot.replaceChildren(), ["backup_run"]));
+    };
+    return h("div", { class: "ui-stack" }, card(d.db.title, "database", list), card(d.db.backups, "database-backup", backups, slot));
   }
 
   // ---- Deployments

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.0 - 2026-11-10
+
+- **Back up a database now**: Databases → Backups → **Back up now** runs one of its backups at once (a dump sent to
+  its destination, the database keeps running), after you confirm. The list also shows each backup's destination.
+- **Backups were missing from the list** with Dokploy v0.31 (its overview can be empty while backups exist): they
+  are now read from each database. Only the destination's name is shown, never its keys.
+
 ## 1.8.0 - 2026-11-10
 
 - **Live logs**: Services → **Logs** shows what a service's container prints now: apps, stacks (pick the container)

@@ -152,6 +152,8 @@ def handle(ctx, method, path, query, body):
                 str(query.get("since") or "all"),
                 str(query.get("search") or ""),
             )
+        if path == "backup" and method == "POST":  # runs one existing backup now, after the page asked
+            return core.run_backup(core.client(state, secret, timeout=25), str(body.get("id") or ""))
         if path == "deployment-log" and method == "GET":
             return core.deployment_log(c, str(query.get("id") or ""))
         if path == "services" and method == "GET":

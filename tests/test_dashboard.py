@@ -78,7 +78,7 @@ def test_domains_add_the_hosts_a_compose_routes_itself(dash):
 
 
 def test_backups_show_their_last_run(dash):
-    (b,) = dash["backups"]
+    b = next(x for x in dash["backups"] if x["id"] == "b1")
     assert (b["id"], b["schedule"], b["keep"], b["db_type"]) == ("b1", "0 3 * * *", 7, "postgres")
     assert b["last_run"] == {"status": "done", "at": "2026-11-10T03:00:00Z"}
 
@@ -259,3 +259,19 @@ def test_container_logs_refuse_bad_values(api, fake, state, query):
     code, err = api.handle(ctx(state), "GET", "container-log", {"id": "c1", **query}, None)  # 5: another stack's
     assert (code, err["error"]) == (400, "bad_value")
     assert not [p for _, p, _ in fake.calls if p.endswith("readLogs")]
+
+
+def test_backups_are_read_from_each_database(dash):
+    b2 = next(b for b in dash["backups"] if b["id"] == "b2")
+    assert (b2["service"], b2["destination"], b2["keep"]) == ("db", "offsite", 3)
+    assert b2["last_run"] == {"status": "done", "at": "2026-11-09T04:00:00Z"}
+    assert {b["id"] for b in dash["backups"]} == {"b1", "b2"}  # overview's and the database's, once each
+
+
+def test_a_backup_runs_now_with_its_own_procedure(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    r = api.handle(ctx(state), "POST", "backup", {}, {"id": "b2"})
+    assert r == {"started": "b2", "done": True} and "leak-" not in json.dumps(r)
+    assert ("POST", "backup.manualBackupPostgres", {"backupId": "b2"}) in fake.calls
+    code, err = api.handle(ctx(state), "POST", "backup", {}, {"id": "../x"})
+    assert (code, err["error"]) == (400, "bad_value")

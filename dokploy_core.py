@@ -1187,9 +1187,61 @@ def _backups(raw: Any, deps: list[dict]) -> list[dict]:
     out = []
     for b in _rows(raw):
         row = _pick(b, keys)
-        row["last_run"] = last_run.get(row.get("id"))
+        runs = sorted(_rows(b.get("deployments")), key=lambda d: _when(d.get("createdAt")), reverse=True)
+        own = {"status": runs[0].get("status"), "at": runs[0].get("createdAt")} if runs else None
+        row["last_run"] = last_run.get(row.get("id")) or own
+        dest = b.get("destination")  # an object holding the S3 keys: only its name leaves this module
+        row["destination"] = dest.get("name") if isinstance(dest, dict) and isinstance(dest.get("name"), str) else None
         out.append(row)
     return out
+
+
+DB_ONE = {"postgres": "postgresId", "mysql": "mysqlId", "mariadb": "mariadbId", "mongo": "mongoId"}
+DB_ONE["libsql"] = "libsqlId"
+DASH_DB_READS = 20
+
+
+def _db_backups(c: Client, services: list[dict]) -> list[dict]:
+    """Backups as each database holds them (overview.backups can be empty while they exist), named after it."""
+    dbs = [s for s in services if s.get("kind") in DB_ONE and s.get("id")][:DASH_DB_READS]
+    if not dbs:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(dbs))) as ex:
+        ones = list(ex.map(lambda s: _try(c, f"{s['kind']}.one", {DB_ONE[s["kind"]]: s["id"]}), dbs))
+    out = []
+    for s, one in zip(dbs, ones, strict=True):
+        for b in _rows(one.get("backups")) if isinstance(one, dict) else []:
+            out.append({**b, "serviceName": b.get("serviceName") or s.get("name"), "projectName": s.get("project")})
+    return out
+
+
+MANUAL_BACKUP = {
+    "postgres": "backup.manualBackupPostgres",
+    "mysql": "backup.manualBackupMySql",
+    "mariadb": "backup.manualBackupMariadb",
+    "mongo": "backup.manualBackupMongo",
+    "libsql": "backup.manualBackupLibsql",
+}
+
+
+def run_backup(c: Client, backup_id: str) -> dict:
+    """Runs one existing backup now, as Dokploy's own Run button does: a dump sent to its destination."""
+    if not CONTAINER_RE.match(backup_id or ""):
+        raise DokployError("bad_value", "unknown backup")
+    b = c.get("backup.one", {"backupId": backup_id})
+    if not isinstance(b, dict) or not b.get("backupId"):
+        raise DokployError("not_found", "no such backup")
+    compose = b.get("backupType") == "compose"
+    proc = "backup.manualBackupCompose" if compose else MANUAL_BACKUP.get(b.get("databaseType"))
+    if not proc:
+        raise DokployError("not_supported", f"this backup type ({b.get('databaseType')}) cannot be run from here")
+    try:
+        c.post(proc, {"backupId": backup_id})
+    except DokployError as e:
+        if e.code != "unreachable":  # a long dump outlives the request: it goes on in Dokploy
+            raise
+        return {"started": backup_id, "done": False}
+    return {"started": backup_id, "done": True}
 
 
 DASH_PROCS = {
@@ -1276,7 +1328,11 @@ def dashboard(c: Client) -> dict:
         "domains": when("domains", domains),
         "deployments": when("deployments", deployments),
         "queue": len(got["queue"]) if isinstance(got["queue"], list) else None,
-        "backups": when("backups", _backups(got["backups"], deps)),
+        "backups": _backups(
+            list({str(b.get("backupId")): b for b in _rows(got["backups"]) + _db_backups(c, services)}.values()), deps
+        )
+        if got["backups"] is not None or any(s.get("kind") in DB_ONE for s in services)
+        else None,
     }
 
 
