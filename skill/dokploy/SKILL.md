@@ -25,17 +25,19 @@ python3 $D domain list APP
 python3 $D deploy APP --yes             # or redeploy (rebuild)
 python3 $D stop|start APP --yes         # its containers, nothing rebuilt
 python3 $D rollback APP --yes           # back before the deployment running now (applications)
+python3 $D restart APP --container ID --yes  # one of its containers (ids: health --json)
+python3 $D scale APP REPLICAS --yes      # applications only, 0 to 20; applied by a reload
 python3 $D domain add APP HOST [--port N] [--path P] [--service S] [--no-https] --yes
 python3 $D app create --environment ID --name N --repo URL [--branch B] [--build nixpacks|dockerfile|...] --yes
 ```
 
 ## Rules
 
-- **Ask before every write.** `deploy`, `redeploy`, `stop`, `start`, `rollback`, `domain add` and `app create` change
+- **Ask before every write.** `deploy`, `redeploy`, `stop`, `start`, `rollback`, `restart`, `scale`, `domain add` and `app create` change
   a live service: say what will happen (which app, which project, which domain) and wait for the user's yes before
   adding `--yes`. A command without `--yes` stops with exit code 3 and changes nothing.
 - **Protected services** (`[protected]` in `list`, `"protected": true` in `--json`) are read-only: deploy, redeploy,
-  stop, start, rollback and domain add are refused (`protected`). Never look for a way around it: only the user lifts
+  stop, start, rollback, restart, scale and domain add are refused (`protected`). Never look for a way around it: only the user lifts
   it, on the Dokploy page in Harness.
 - **Say the risks before asking.** A deploy without `--yes` prints them (`tell the user: ...`): a compose stack or an
   app that is not start-first is down for a few seconds; a service with no git source rebuilds nothing.

@@ -69,6 +69,10 @@ const T = {
     },
     typeName: (n) => `Type ${n} to confirm`, confirm: "Confirm", cancel: "Cancel",
     stop: "Stop", start: "Start", rollback: "Roll back",
+    restartBtn: "Restart a container", restartTitle: (n) => `Restart a container of ${n}`, restartOne: "Restart",
+    restartQ: (b, n) => `Restart ${b} of ${n} now?`, restarted: (b) => `${b} is restarting.`,
+    scaleBtn: "Scale", scaleTitle: (n) => `Replicas of ${n}`, scaleLabel: "Replicas (0 stops it)", scaleApply: "Apply",
+    scaleQ: (n, r) => `Run ${n} with ${r} replica${r === 1 ? "" : "s"}?`, scaled: (n, r) => `${n}: ${r} replica${r === 1 ? "" : "s"} asked.`,
     confirmStop: (n) => `Stop ${n} now?`, confirmStart: (n) => `Start ${n} now?`,
     confirmRollback: (n, d) => `Roll ${n} back to “${d}”?`,
     doneAction: { stop: (n) => `${n} is stopping.`, start: (n) => `${n} is starting.`, rollback: (n) => `Rollback of ${n} started.` },
@@ -199,6 +203,10 @@ const T = {
     },
     typeName: (n) => `Tapez ${n} pour confirmer`, confirm: "Confirmer", cancel: "Annuler",
     stop: "Arrêter", start: "Démarrer", rollback: "Revenir en arrière",
+    restartBtn: "Redémarrer un conteneur", restartTitle: (n) => `Redémarrer un conteneur de ${n}`, restartOne: "Redémarrer",
+    restartQ: (b, n) => `Redémarrer ${b} de ${n} maintenant ?`, restarted: (b) => `${b} redémarre.`,
+    scaleBtn: "Mettre à l’échelle", scaleTitle: (n) => `Répliques de ${n}`, scaleLabel: "Répliques (0 l’arrête)", scaleApply: "Appliquer",
+    scaleQ: (n, r) => `Faire tourner ${n} avec ${r} réplique${r > 1 ? "s" : ""} ?`, scaled: (n, r) => `${n} : ${r} réplique${r > 1 ? "s" : ""} demandée${r > 1 ? "s" : ""}.`,
     confirmStop: (n) => `Arrêter ${n} maintenant ?`, confirmStart: (n) => `Démarrer ${n} maintenant ?`,
     confirmRollback: (n, d) => `Revenir pour ${n} au déploiement « ${d} » ?`,
     doneAction: { stop: (n) => `${n} s’arrête.`, start: (n) => `${n} démarre.`, rollback: (n) => `Retour arrière de ${n} lancé.` },
@@ -934,6 +942,49 @@ export function mount(el, ctx) {
     const protect = async (svc, on) => {
       try { await ctx.api("protect", { method: "POST", body: { id: svc.id, on } }); load(); } catch (e) { fail(e); }
     };
+    // One container at a time, chosen among the service's own (the server checks it again).
+    const restartPanel = (svc) => {
+      const list = h("ul", { class: "dk-list" }, h("li", {}, h("span", { class: "ui-skeleton", style: "display:block;height:1.2em;width:50%" })));
+      healthOf(svc).then((r) => {
+        if (!alive) return;
+        const boxes = (r.containers || []).filter((b) => b.id && (svc.kind !== "application" || b.state === "running"));  // as the server allows
+        list.replaceChildren(...(boxes.length ? boxes.map((b) => h("li", {},
+          h("span", { class: "dk-grow" }, h("b", { class: "dk-trunc", style: "display:block" }, b.name), h("span", { class: "dk-sub" }, b.status || b.state || "")),
+          btn(t.restartOne, "refresh-cw", () => slot.replaceChildren(confirmPanel(svc, t.restartQ(b.name, svc.name), async () => {
+            try {
+              await ctx.api("restart", { method: "POST", body: { id: svc.id, container: b.id } });
+              say(t.restarted(b.name), "ui-success");
+              healthCache.delete(svc.id);
+              setTimeout(() => { if (alive) load(); }, 4000);
+            } catch (e) { fail(e); }
+          }, close, ["downtime"])), "ui-btn ui-outline ui-sm"))) : [h("li", {}, t.health.unknown)]));
+      }).catch((e) => { if (alive) list.replaceChildren(h("li", {}, e.message)); });
+      slot.replaceChildren(h("div", { class: "ui-card ui-stack" },
+        h("div", { class: "ui-row" }, h("b", {}, t.restartTitle(svc.name)), h("span", { class: "ui-spacer" }), btn(t.close, "x", close, "ui-btn ui-ghost ui-sm")), list));
+    };
+    // Replicas of an application: saved then applied by a reload (start-first apps stay up while it rolls).
+    const scalePanel = (svc) => {
+      const input = h("input", { class: "ui-input", type: "number", min: "0", max: "20", step: "1", inputmode: "numeric",
+        value: String(svc.replicas ?? 1), "aria-label": t.scaleLabel, style: "max-width:120px" });
+      const apply = () => {
+        const n = Number(input.value);
+        if (!Number.isInteger(n) || n < 0 || n > 20) { input.focus(); return; }
+        const risks = (svc.risks || ["unknown"]).filter((x) => x !== "no_rebuild").concat(n === 0 ? ["stopped"] : []);
+        slot.replaceChildren(confirmPanel(svc, t.scaleQ(svc.name, n), async () => {
+          try {
+            await ctx.api("scale", { method: "POST", body: { id: svc.id, replicas: n } });
+            say(t.scaled(svc.name, n), "ui-success");
+            healthCache.delete(svc.id);
+            setTimeout(() => { if (alive) load(); }, 6000);
+          } catch (e) { fail(e); }
+        }, close, risks.length ? risks : []));
+      };
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
+      slot.replaceChildren(h("div", { class: "ui-card ui-stack" },
+        h("div", { class: "ui-row" }, h("b", {}, t.scaleTitle(svc.name)), h("span", { class: "ui-spacer" }), btn(t.close, "x", close, "ui-btn ui-ghost ui-sm")),
+        h("label", { class: "ui-label" }, t.scaleLabel), h("div", { class: "dk-actions" }, input, btn(t.scaleApply, "check", apply, "ui-btn ui-sm"))));
+      queueMicrotask(() => input.focus());
+    };
     const healthOf = (s) => {  // one request per service, cached for the page's life (Refresh clears it)
       if (!healthCache.has(s.id)) healthCache.set(s.id, ctx.api(`health?id=${encodeURIComponent(s.id)}`));
       return healthCache.get(s.id);
@@ -973,6 +1024,8 @@ export function mount(el, ctx) {
           !s.protected ? [
             btn(t.redeploy, "hammer", () => deploy(s, true), "ui-btn ui-ghost ui-sm"),
             s.kind === "application" && s.rollback_active ? btn(t.rollback, "refresh-cw", () => act(s, "rollback"), "ui-btn ui-ghost ui-sm") : null,
+            btn(t.restartBtn, "refresh-cw", () => restartPanel(s), "ui-btn ui-ghost ui-sm"),
+            s.kind === "application" ? btn(t.scaleBtn, "layers", () => scalePanel(s), "ui-btn ui-ghost ui-sm") : null,
             btn(t.stop, "x", () => act(s, "stop"), "ui-btn ui-ghost ui-sm"),
             btn(t.start, "check", () => act(s, "start"), "ui-btn ui-ghost ui-sm"),
           ] : null,

@@ -275,3 +275,46 @@ def test_a_backup_runs_now_with_its_own_procedure(api, fake, state):
     assert ("POST", "backup.manualBackupPostgres", {"backupId": "b2"}) in fake.calls
     code, err = api.handle(ctx(state), "POST", "backup", {}, {"id": "../x"})
     assert (code, err["error"]) == (400, "bad_value")
+
+
+def test_restart_only_one_of_the_services_own_containers(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state), "POST", "restart", {}, {"id": "c1", "container": "3"}) == {"restarted": "3"}
+    assert ("POST", "docker.restartContainer", {"containerId": "3"}) in fake.calls
+    for other in ("5", "1", "x;y", ""):  # another stack's, an app's, garbage
+        code, err = api.handle(ctx(state), "POST", "restart", {}, {"id": "c1", "container": other})
+        assert (code, err["error"]) == (400, "bad_value")
+    api.handle(ctx(state), "POST", "protect", {}, {"id": "c1", "on": True})
+    code, err = api.handle(ctx(state), "POST", "restart", {}, {"id": "c1", "container": "3"})
+    assert (code, err["error"]) == (409, "protected")
+
+
+def test_scale_saves_then_applies_an_applications_replicas(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state), "POST", "scale", {}, {"id": "a1", "replicas": 3}) == {"replicas": 3}
+    posts = [(p, d) for m, p, d in fake.calls if m == "POST" and p.startswith("application.")]
+    assert posts == [
+        ("application.update", {"applicationId": "a1", "replicas": 3}),
+        ("application.reload", {"applicationId": "a1", "appName": "acme-web-x1"}),
+    ]
+    for bad in (-1, 21, "2", True, None):
+        code, err = api.handle(ctx(state), "POST", "scale", {}, {"id": "a1", "replicas": bad})
+        assert (code, err["error"]) == (400, "bad_value")
+    code, err = api.handle(ctx(state), "POST", "scale", {}, {"id": "c1", "replicas": 2})
+    assert (code, err["error"]) == (409, "not_supported")
+
+
+def test_the_cli_scales_only_with_yes(api, fake, state, maxxing_bin, core, capsys):
+    cli = load("dokploy")
+    maxxing_bin("DOKPLOY_API_KEY", KEY)
+    core.connect(state, lambda n: KEY if n == "DOKPLOY_API_KEY" else None, fake.url)
+    assert cli.main(["scale", "a1", "2"]) == 3  # asks first
+    assert not [p for m, p, _ in fake.calls if m == "POST" and p == "application.update"]
+    assert cli.main(["scale", "a1", "2", "--yes"]) == 0
+    assert ("POST", "application.update", {"applicationId": "a1", "replicas": 2}) in fake.calls
+    capsys.readouterr()
+
+
+def test_an_applications_running_container_restarts(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state), "POST", "restart", {}, {"id": "a1", "container": "1"}) == {"restarted": "1"}

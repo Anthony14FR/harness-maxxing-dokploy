@@ -1560,3 +1560,38 @@ def container_logs(
         params["containerId"] = container
     text = c.get(f"{kind}.readLogs", {_ID[kind]: svc["id"], **params})
     return {"log": redact(text if isinstance(text, str) else ""), "container": container, "containers": boxes}
+
+
+# Restart one container, or change an application's replicas: both run only after the user agreed (page or --yes),
+# never on a protected service (the callers guard), and only on what belongs to that service.
+MAX_REPLICAS = 20
+
+
+def restart_container(c: Client, svc: dict, container: str) -> dict:
+    """Restarts one of the service's own containers (docker restart): it is away a few seconds."""
+    _deployable(svc)
+    if not CONTAINER_RE.match(container or ""):
+        raise DokployError("bad_value", "unknown container")
+    boxes = [b for b in health(c, svc)["containers"] if b.get("id")]
+    if svc["kind"] == "application":  # swarm owns an app's tasks: an exited one is history, not something to restart
+        boxes = [b for b in boxes if b.get("state") == "running"]
+    if container not in {b["id"] for b in boxes}:
+        raise DokployError("bad_value", "that container is not one of this service's")
+    c.post(
+        "docker.restartContainer",
+        {"containerId": container, **({"serverId": svc["server_id"]} if svc.get("server_id") else {})},
+    )
+    return {"restarted": container}
+
+
+def scale(c: Client, svc: dict, replicas: int) -> dict:
+    """Sets an application's replicas and applies them (Dokploy saves the number, then reloads the service)."""
+    if svc["kind"] != "application":
+        raise DokployError("not_supported", "only applications have replicas (a compose stack scales in its file)")
+    if not isinstance(replicas, int) or isinstance(replicas, bool) or not 0 <= replicas <= MAX_REPLICAS:
+        raise DokployError("bad_value", f"replicas must be a whole number from 0 to {MAX_REPLICAS}")
+    if not svc.get("app_name"):
+        raise DokployError("not_found", "Dokploy did not give this application's name")
+    c.post("application.update", {"applicationId": svc["id"], "replicas": replicas})
+    c.post("application.reload", {"applicationId": svc["id"], "appName": svc["app_name"]})
+    return {"replicas": replicas}
