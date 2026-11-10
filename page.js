@@ -293,6 +293,13 @@ const CSS = `
 .dk .dk-upd{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .dk .dk-upd .dk-grow{flex:1 1 260px}
 .dk .dk-short{display:none}
+.dk .dk-md{max-height:260px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--muted);font-size:13px;line-height:1.5}
+.dk .dk-md>:first-child{margin-top:0}
+.dk .dk-md-h{margin:12px 0 4px;font-size:13px;font-weight:600}
+.dk .dk-md-ul{margin:0 0 4px;padding-left:18px;list-style:disc}
+.dk .dk-md-ul li{margin:3px 0}
+.dk .dk-md p{margin:4px 0}
+.dk .dk-md-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;padding:0 4px;border-radius:4px;background:var(--background)}
 @media (max-width:720px){.dk .dk-upd .dk-grow{order:3;flex-basis:100%}.dk .dk-upd>.ui-btn{order:4}.dk .dk-stat-value{font-size:22px}}
 .dk .ui-table td{vertical-align:middle}
 .dk .ui-num{white-space:nowrap}
@@ -336,6 +343,51 @@ function h(tag, attrs = {}, ...children) {
   }
   for (const c of children.flat()) if (c != null) e.append(c);   // text nodes only: data is never parsed as HTML
   return e;
+}
+
+// **bold**, `code` and [text](https://…) of a changelog line, as nodes; any other link target stays plain text.
+function inline(text) {
+  const out = [];
+  const rx = /\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  let last = 0;
+  for (const m of text.matchAll(rx)) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1] != null) out.push(h("strong", {}, m[1]));
+    else if (m[2] != null) out.push(h("code", { class: "dk-md-code" }, m[2]));
+    else if (/^https?:\/\//i.test(m[4])) out.push(h("a", { class: "ui-link", href: m[4], target: "_blank", rel: "noopener noreferrer" }, m[3]));
+    else out.push(m[3]);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+// The CHANGELOG sections of an update: "## 1.4.1 - date" headings, "- " bullets whose wrapped lines continue them.
+function markdown(text) {
+  const root = h("div", { class: "dk-md" });
+  let list = null, item = null, para = null;
+  for (const raw of String(text).split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    const head = line.match(/^#{1,6}\s+(.*)$/);
+    const bullet = line.match(/^(\s*)[-*]\s+(.*)$/);
+    if (!line.trim()) { list = item = para = null; continue; }
+    if (head) {
+      list = item = para = null;
+      root.append(h("h4", { class: "dk-md-h" }, inline(head[1])));
+    } else if (bullet) {
+      para = null;
+      if (!list) root.append(list = h("ul", { class: "dk-md-ul" }));
+      list.append(item = h("li", {}, inline(bullet[2])));
+    } else if (item && /^\s/.test(line)) {
+      item.append(" ", ...inline(line.trim()));
+    } else if (para) {
+      para.append(" ", ...inline(line.trim()));
+    } else {
+      list = item = null;
+      root.append(para = h("p", {}, inline(line.trim())));
+    }
+  }
+  return root;
 }
 
 export function mount(el, ctx) {
@@ -524,7 +576,7 @@ export function mount(el, ctx) {
         let ext;
         if (e.state === "up_to_date") ext = h("span", { class: "ui-muted" }, u.upToDate(e.current));
         else if (e.state === "available") {
-          ext = [h("span", {}, u.available(e.current, e.new)), e.changes ? h("pre", { class: "ui-code", style: "max-height:240px;overflow:auto;white-space:pre-wrap" }, e.changes) : null,
+          ext = [h("span", {}, u.available(e.current, e.new)), e.changes ? markdown(e.changes) : null,
             h("div", {}, btn(u.update, "download", () => slot.replaceChildren(confirmPanel({ name: "extension" },
               u.confirmExt(e.current, e.new), run("extension", e.commit, u.doneExt), () => slot.replaceChildren(), [])), "ui-btn ui-sm"))];
         } else if (e.state === "blocked") {

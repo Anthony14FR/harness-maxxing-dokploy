@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.2 - 2026-11-10
+
+- **Readable update notes**: the notes of a new version are shown formatted (version headings, bullets, bold, code)
+  instead of raw Markdown. You see it from the update after this one: the notes are drawn by the version you have.
+
 ## 1.4.1 - 2026-11-10
 
 - **Statuses start with a capital**: Done / Réussi, Running 2/2 / En marche 2/2, Failed / En échec, Healthy / Sain...
