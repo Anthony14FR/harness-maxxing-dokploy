@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 - 2026-11-10
+
+- **A full Dokploy dashboard**: updates on top, then Overview (what needs attention, counters, CPU / memory / disk,
+  recent deployments), Services, Domains (HTTPS, certificates, hosts routed by Traefik labels), Databases (containers,
+  backups and their last run), Deployments (apps, stacks and backups, failed or in progress, with log) and Server
+  (resources, Dokploy's database and Traefik with its version, public IP, Docker disk usage, remote servers). Each part
+  that an older Dokploy lacks says so instead of failing; only plain listed fields leave the server, never the secrets
+  Dokploy nests in its answers.
+- **In the sidebar by itself**: the page pins itself once when Harness loads it; unpin it and it stays unpinned.
+- **Works on a phone**: tables become cards, touch-sized buttons, the tab bar scrolls; keyboard tabs, labels for
+  screen readers, light and dark, English or French as Harness is set. Actions other than Deploy and Logs sit in a
+  **More** menu.
+- Databases now show their name with Dokploy v0.31 (its project list gives them only an id), in the page and in
+  `dokploy.py list`.
+
 ## 1.3.1 - 2026-11-09
 
 - **Domains of a compose that routes itself**: a compose whose own Traefik labels route its hosts (instead of

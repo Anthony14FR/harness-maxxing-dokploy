@@ -723,7 +723,21 @@ def inventory(c: Client) -> list[dict]:
         with ThreadPoolExecutor(max_workers=min(8, len(todo))) as ex:
             done = {s["id"]: x for s, x in zip(todo, ex.map(lambda x: detail(c, x), todo), strict=True)}
         svcs = [done.get(s["id"], s) for s in svcs]
+    if any(s["kind"] in DB_KINDS and s["name"] == s["id"] for s in svcs):  # v0.31 gives databases only their id
+        named = {str(o.get("id")): o for o in _rows(_try(c, "overview.services"))}
+        svcs = [_named(s, named.get(s["id"])) if s["kind"] in DB_KINDS else s for s in svcs]
     return svcs
+
+
+def _named(s: dict, o: dict | None) -> dict:
+    if not o:
+        return s
+    fill = {
+        "name": o.get("name") if s["name"] == s["id"] else None,
+        "app_name": o.get("appName"),
+        "status": o.get("status"),
+    }
+    return {**s, **{k: v for k, v in fill.items() if isinstance(v, str) and v and not (s.get(k) and k != "name")}}
 
 
 def lookup(c: Client, ref: str) -> dict:
@@ -1027,7 +1041,7 @@ def _when(stamp: str | None) -> dt.datetime:
 def log(dep: dict, lines: int = 200) -> str:
     """Tail of a deployment log; only a regular file under Dokploy's log folder of this server is read."""
     raw = dep.get("log_path")
-    if not raw:
+    if not raw or not isinstance(raw, str):
         raise DokployError("no_log", "this deployment has no log file")
     root = logs_dir().resolve()
     p = Path(raw).resolve()
@@ -1038,4 +1052,204 @@ def log(dep: dict, lines: int = 200) -> str:
         f.seek(0, 2)
         f.seek(max(0, f.tell() - 256 * 1024))
         tail = f.read().decode("utf-8", "replace").splitlines()
-    return "\n".join(tail[-n:])
+    return redact("\n".join(tail[-n:]))
+
+
+_URL_CREDENTIALS = re.compile(r"(?<=://)[^/@\s]+@")
+
+
+def redact(text: str) -> str:
+    """Hides credentials in URLs (https://user:token@host): a failed git clone can print its remote."""
+    return _URL_CREDENTIALS.sub("***@", text)
+
+
+# Dashboard: one read of the whole Dokploy, each part on its own (an older Dokploy without a procedure gives None for
+# that part, not an error). Only listed scalar fields leave this module: several answers hold secrets (ssh keys in the
+# web server settings and servers, keys of certificates and backup destinations), which are never read or passed on.
+DASH_DEPLOYMENTS = 60
+DASH_ROUTED_COMPOSES = 20
+DASH_ROUTED_CONTAINERS = 4  # label reads per compose on the dashboard (the Services tab reads up to 10 per service)
+DASH_ROUTED_BUDGET = 10.0  # seconds already spent above which the label reads are skipped
+_SCALAR = (str, int, float, bool, type(None))
+
+
+def _pick(d: Any, keys: dict[str, str]) -> dict:
+    """{out_name: d[in_name]} for scalar values only: nested objects (where secrets sit) never pass."""
+    if not isinstance(d, dict):
+        return {}
+    return {out: d.get(k) for k, out in keys.items() if isinstance(d.get(k), _SCALAR)}
+
+
+def _try(c: Client, proc: str, params: dict | None = None) -> Any:
+    try:
+        return c.get(proc, params)
+    except DokployError:
+        return None
+
+
+def _rows(x: Any) -> list[dict]:
+    return [r for r in x if isinstance(r, dict)] if isinstance(x, list) else []
+
+
+def _num(v: Any) -> float | int | None:
+    return v if isinstance(v, int | float) and not isinstance(v, bool) else None
+
+
+def _resources(h: Any) -> dict | None:
+    if not isinstance(h, dict):
+        return None
+    part = lambda k: h.get(k) if isinstance(h.get(k), dict) else {}  # noqa: E731 - another shape gives empty values
+    res, disk, box, resv = part("resources"), part("disk"), part("containers"), part("reservation")
+    nano = _num(resv.get("cpuReservedNanoCpus"))
+    return {
+        "cpus": _num(res.get("cpuCount")),
+        "mem_total": _num(res.get("memTotalBytes")),
+        "mem_used": _num(res.get("memUsedBytes")),
+        "disk_total": _num(disk.get("totalBytes")),
+        "disk_used": _num(disk.get("usedBytes")),
+        "containers": _num(box.get("containerCount")),
+        "services": _num(box.get("serviceCount")),
+        "mem_reserved": _num(resv.get("memoryReservedBytes")),
+        "cpu_reserved": round(nano / 1e9, 2) if nano is not None else None,
+        "checked": h.get("checkedAt") if isinstance(h.get("checkedAt"), str) else None,
+    }
+
+
+def _deployment(d: dict, names: dict[str, dict]) -> dict:
+    sid = d.get("applicationId") or d.get("composeId")
+    svc = names.get(str(sid)) if sid else None
+    kind = "backup" if d.get("backupId") else "schedule" if d.get("scheduleId") else (svc or {}).get("kind")
+    err = d.get("errorMessage")
+    return {
+        "id": d.get("deploymentId"),
+        "title": (str(d.get("title") or "").strip().split("\n")[0][:120]) or None,
+        "status": d.get("status"),
+        "created": d.get("createdAt"),
+        "started": d.get("startedAt"),
+        "finished": d.get("finishedAt"),
+        "error": redact(err)[:300] if isinstance(err, str) and err else None,
+        "service": (svc or {}).get("name"),
+        "service_id": sid,
+        "project": (svc or {}).get("project"),
+        "kind": kind,
+        "has_log": bool(d.get("logPath")),
+    }
+
+
+def _domains(raw: Any) -> list[dict]:
+    keys = {"host": "host", "path": "path", "port": "port", "https": "https", "certificateType": "cert"}
+    keys |= {"enabled": "enabled", "serviceName": "service", "serviceOwnerId": "service_id"}
+    keys |= {"serviceOwnerType": "kind", "projectName": "project", "environmentName": "environment"}
+    return [{**_pick(d, keys), "routed": False} for d in _rows(raw) if d.get("host")]
+
+
+def _backups(raw: Any, deps: list[dict]) -> list[dict]:
+    """deps: every deployment, newest first (a backup's last run can be older than the dashboard's list)."""
+    last_run: dict[str, dict] = {}
+    for d in deps:
+        if d.get("backupId"):
+            last_run.setdefault(d["backupId"], {"status": d.get("status"), "at": d.get("createdAt")})
+    keys = {"backupId": "id", "schedule": "schedule", "enabled": "enabled", "database": "database"}
+    keys |= {"databaseType": "db_type", "backupType": "type", "keepLatestCount": "keep", "prefix": "prefix"}
+    keys |= {"serviceName": "service", "name": "name", "projectName": "project", "appName": "app_name"}
+    out = []
+    for b in _rows(raw):
+        row = _pick(b, keys)
+        row["last_run"] = last_run.get(row.get("id"))
+        out.append(row)
+    return out
+
+
+DASH_PROCS = {
+    "stats": "project.homeStats",
+    "health": "docker.getServerHealth",
+    "infra": "settings.checkInfrastructureHealth",
+    "traefik": "settings.getTraefikOverview",
+    "ip": "settings.getIp",
+    "disk": "settings.getDockerDiskUsage",
+    "cleanup": "settings.getLogCleanupStatus",
+    "servers": "server.all",
+    "services": "overview.services",
+    "domains": "overview.domains",
+    "backups": "overview.backups",
+    "deployments": "deployment.allCentralized",
+    "queue": "deployment.queueList",
+    "containers": "docker.getContainers",
+}
+
+
+def dashboard(c: Client) -> dict:
+    """Everything the Dokploy page shows besides the services table, read in parallel."""
+    start = time.monotonic()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        got = dict(zip(DASH_PROCS, ex.map(lambda p: _try(c, p), DASH_PROCS.values()), strict=True))
+
+    skeys = {"id": "id", "name": "name", "appName": "app_name", "type": "kind", "status": "status"}
+    skeys |= {"projectName": "project", "environmentName": "environment", "serverName": "server"}
+    skeys |= {"lastDeployAt": "last_deploy", "serverId": "server_id"}
+    services = [_pick(s, skeys) for s in _rows(got["services"])]
+    names = {str(s.get("id")): s for s in services}
+    boxes = _rows(got["containers"])
+    domains = _domains(got["domains"])
+
+    def routed(s: dict) -> list[dict]:  # hosts a compose routes with its own Traefik labels
+        rows = [r for r in boxes if _mine(str(r.get("name") or ""), s["app_name"], "compose")][:DASH_ROUTED_CONTAINERS]
+        known = [d for d in domains if d.get("service_id") == s.get("id")]
+        return _routed(c, {"domains": known, "server_id": s.get("server_id")}, rows)
+
+    composes = [s for s in services if s.get("kind") == "compose" and s.get("app_name")][:DASH_ROUTED_COMPOSES]
+    if composes and boxes and time.monotonic() - start < DASH_ROUTED_BUDGET:  # Harness stops a request at 30 s
+        with ThreadPoolExecutor(max_workers=min(8, len(composes))) as ex:
+            for s, extra in zip(composes, ex.map(routed, composes), strict=True):
+                domains += [
+                    {**d, "cert": None, "enabled": True, "service": s.get("name"), "service_id": s.get("id")}
+                    | {"kind": "compose", "project": s.get("project"), "environment": s.get("environment")}
+                    | {"routed": True}
+                    for d in extra
+                ]
+
+    deps = sorted(_rows(got["deployments"]), key=lambda d: _when(d.get("createdAt")), reverse=True)
+    deployments = [_deployment(d, names) for d in deps[:DASH_DEPLOYMENTS]]
+    stats, infra = got["stats"], got["infra"]
+    skeys = {"projects": "projects", "environments": "environments", "applications": "applications"}
+    skeys |= {"compose": "compose", "databases": "databases", "services": "services"}
+    tkeys = {"state": "state", "currentVersion": "version", "recommendedVersion": "recommended"}
+    tkeys |= {"versionStatus": "version_status", "startedAt": "started"}
+    dkeys = {"type": "type", "totalCount": "total", "active": "active", "size": "size"}
+    dkeys |= {"reclaimable": "reclaimable", "sizeBytes": "bytes"}
+    vkeys = {"serverId": "id", "name": "name", "ipAddress": "ip", "serverStatus": "status", "serverType": "type"}
+    when = lambda key, value: value if got[key] is not None else None  # noqa: E731
+    return {
+        "stats": {
+            **_pick(stats, skeys),
+            "status": _pick(stats.get("status"), {"running": "running", "error": "error", "idle": "idle"}),
+        }
+        if isinstance(stats, dict)
+        else None,
+        "resources": _resources(got["health"]),
+        "infra": {k: _pick(v, {"status": "status"}).get("status") for k, v in infra.items() if isinstance(v, dict)}
+        if isinstance(infra, dict)
+        else None,
+        "traefik": _pick(got["traefik"], tkeys) or None,
+        "ip": got["ip"] if isinstance(got["ip"], str) else None,
+        "disk_usage": when("disk", [_pick(r, dkeys) for r in _rows(got["disk"])]),
+        "log_cleanup": _pick(got["cleanup"], {"enabled": "enabled", "cronExpression": "cron"}) or None,
+        "servers": when("servers", [_pick(s, vkeys) for s in _rows(got["servers"])]),
+        "services": when("services", services),
+        "containers": when(
+            "containers",
+            [_pick(r, {"name": "name", "state": "state", "status": "status", "image": "image"}) for r in boxes],
+        ),
+        "domains": when("domains", domains),
+        "deployments": when("deployments", deployments),
+        "queue": len(got["queue"]) if isinstance(got["queue"], list) else None,
+        "backups": when("backups", _backups(got["backups"], deps)),
+    }
+
+
+def deployment_log(c: Client, dep_id: str, lines: int = 300) -> dict:
+    """Log of any deployment of the dashboard's list (apps, stacks, backups), by its id."""
+    dep = next((d for d in _rows(c.get("deployment.allCentralized")) if d.get("deploymentId") == dep_id), None)
+    if not dep:
+        raise DokployError("not_found", "no such deployment")
+    return {"deployment": dep_id, "log": log({"log_path": dep.get("logPath")}, lines)}
