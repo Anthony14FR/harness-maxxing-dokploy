@@ -1432,3 +1432,31 @@ def save_alert_state(state_dir: str | Path, state: dict) -> None:
     tmp.write_text(json.dumps(state))
     os.chmod(tmp, 0o600)
     tmp.replace(d / "alerts.json")
+
+
+# Disk cleanup, deliberately narrow: only Docker's build cache, rebuilt on demand by the next builds. Volumes (data),
+# images (what rollbacks start again), containers and everything else Dokploy can prune are never offered.
+def _build_cache_bytes(c: Client) -> int | None:
+    rows = _rows(_try(c, "settings.getDockerDiskUsage"))
+    row = next((r for r in rows if str(r.get("type") or "").lower().startswith("build")), None)
+    return _num(row.get("sizeBytes")) if row else None
+
+
+def clear_build_cache(c: Client) -> dict:
+    """Empties the build cache (`docker builder prune --all`) when no build is running; {before, after, freed}."""
+    queued = c.get("deployment.queueList")
+    running = [d for d in _rows(_try(c, "deployment.allCentralized")) if d.get("status") == "running"]
+    if (isinstance(queued, list) and queued) or running:
+        raise DokployError(
+            "deploy_in_progress", "a deployment is running or queued: its build uses the cache, wait for it"
+        )
+    before = _build_cache_bytes(c)
+    try:
+        c.post("dockerDiskUsage.pruneBuildCache", {})
+    except DokployError as e:
+        if e.code != "not_found":
+            raise
+        c.post("settings.cleanDockerBuilder", {})  # Dokploy before v0.31: the same docker builder prune
+    after = _build_cache_bytes(c)
+    freed = before - after if before is not None and after is not None and before >= after else None
+    return {"before": before, "after": after, "freed": freed}

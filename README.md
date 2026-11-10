@@ -35,7 +35,9 @@ flowchart LR
   - **Databases**: their containers and their backups (schedule, last run);
   - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
   - **Server**: resources, Dokploy's database and Traefik (version, update available), public IP, Docker disk usage,
-    remote servers.
+    remote servers, and **Clear the build cache**: the only cleanup offered (`docker builder prune`, refused while a
+    build runs). Volumes (your data), images (what a rollback starts again), containers and databases are never
+    touched: Dokploy's other cleanups are not reachable from here.
 - **Made for every screen** - tables turn into cards on a phone, 44 px touch targets, keyboard tabs (arrows, Home,
   End), no color without a word, Harness's own colors and icons in light and dark, English or French as Harness is set.
 - **Actions that ask first** - Deploy, Rebuild, Roll back, Stop, Start. When the site can be down for a few seconds,
@@ -163,7 +165,7 @@ validated first.
   `deployment.allCentralized`, `deployment.queueList`. Only listed plain fields are kept: nested objects (where Dokploy
   puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets
   (web server settings, certificates, destinations, ssh keys) are never called.
-- Writes, each after you agree: `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
+- Writes, each after you agree: `dockerDiskUsage.pruneBuildCache` (or `settings.cleanDockerBuilder` on older Dokploy), `application.deploy` / `redeploy` / `stop` / `start`, `compose.deploy` / `redeploy` /
   `stop` / `start`, `rollback.rollback`, `domain.create`, `application.create`, `application.saveGitProvider`,
   `application.saveBuildType`.
 - Updates: `settings.getDokployVersion`, `settings.getUpdateData`, `settings.getTraefikOverview`, and after you confirm

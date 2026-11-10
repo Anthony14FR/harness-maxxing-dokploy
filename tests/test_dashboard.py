@@ -207,3 +207,33 @@ def test_traefik_last_error_is_shown_masked(api, fake, state, monkeypatch):
     monkeypatch.setitem(DASH, "settings.getTraefikOverview", bad)
     assert api.handle(ctx(state), "GET", "traefik", {}, None)["error"] == "pull https://***@registry.example.com failed"
     assert api.handle(ctx(state), "GET", "dashboard", {}, None)["traefik"]["error"].startswith("pull https://***@")
+
+
+def test_only_the_build_cache_can_be_cleared(api, fake, state, monkeypatch):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    for what in ("volumes", "images", "all", None):
+        code, err = api.handle(ctx(state), "POST", "cleanup", {}, {"what": what})
+        assert (code, err["error"]) == (400, "bad_target")
+    monkeypatch.setitem(DASH, "deployment.queueList", [])
+    monkeypatch.setitem(DASH, "dockerDiskUsage.pruneBuildCache", True)
+    usage = [{"type": "Build Cache", "sizeBytes": 3_000_000_000}, {"type": "Local Volumes", "sizeBytes": 9e9}]
+    monkeypatch.setitem(DASH, "settings.getDockerDiskUsage", usage)
+    r = api.handle(ctx(state), "POST", "cleanup", {}, {"what": "build-cache"})
+    assert r["before"] == 3_000_000_000
+    prunes = [p for m, p, _ in fake.calls if m == "POST" and ("prune" in p.lower() or "clean" in p.lower())]
+    assert prunes == ["dockerDiskUsage.pruneBuildCache"]  # nothing else is ever pruned
+
+
+def test_no_cleanup_while_a_build_runs(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})  # the fake's queue holds one deployment
+    code, err = api.handle(ctx(state), "POST", "cleanup", {}, {"what": "build-cache"})
+    assert (code, err["error"]) == (409, "deploy_in_progress")
+    assert not [p for m, p, _ in fake.calls if m == "POST" and "prune" in p.lower()]
+
+
+def test_an_older_dokploy_uses_its_own_builder_cleanup(api, fake, state, monkeypatch):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    monkeypatch.setitem(DASH, "deployment.queueList", [])
+    monkeypatch.setitem(DASH, "settings.cleanDockerBuilder", True)  # no pruneBuildCache: 404 then the old name
+    api.handle(ctx(state), "POST", "cleanup", {}, {"what": "build-cache"})
+    assert ("POST", "settings.cleanDockerBuilder", {}) in fake.calls

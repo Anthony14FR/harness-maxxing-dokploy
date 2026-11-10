@@ -134,6 +134,10 @@ def handle(ctx, method, path, query, body):
         if path == "dashboard" and method == "GET":  # short timeout: 14 reads must fit in Harness's 30 s
             return core.dashboard(core.client(state, secret, timeout=8))
         c = core.client(state, secret)
+        if path == "cleanup" and method == "POST":  # the build cache only: nothing else can be named here
+            if body.get("what") != "build-cache":
+                return 400, {"error": "bad_target", "message": "only the build cache can be cleared from here"}
+            return core.clear_build_cache(core.client(state, secret, timeout=25))
         if path == "deployment-log" and method == "GET":
             return core.deployment_log(c, str(query.get("id") or ""))
         if path == "services" and method == "GET":
