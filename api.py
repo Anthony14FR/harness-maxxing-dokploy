@@ -160,6 +160,10 @@ def handle(ctx, method, path, query, body):
             )
         if path == "backup" and method == "POST":  # runs one existing backup now, after the page asked
             return core.run_backup(core.client(state, secret, timeout=25), str(body.get("id") or ""))
+        if path == "previews" and method == "GET":
+            return {"previews": core.previews(c)}
+        if path == "preview-redeploy" and method == "POST":  # after the page asked the user
+            return core.redeploy_preview(c, state, str(body.get("id") or ""))
         if path == "deployment-log" and method == "GET":
             return core.deployment_log(c, str(query.get("id") or ""))
         if path == "services" and method == "GET":

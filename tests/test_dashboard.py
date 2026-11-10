@@ -328,3 +328,31 @@ def test_live_stats_are_grouped_per_service(api, fake, state):
     assert (by["c1"]["cpu"], by["c1"]["mem"]) == (1.0, 16_500_000)
     assert "pg1" not in by  # no container of it in the stats: not listed
     assert (s["others"]["cpu"], s["others"]["containers"]) == (3.0, 2)  # Dokploy itself and the unreadable row
+
+
+def test_previews_of_each_application(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    pv = api.handle(ctx(state), "GET", "previews", {}, None)["previews"]
+    first = pv[0]
+    assert (first["id"], first["pr"], first["host"], first["https"], first["last_deployment"]) == (
+        "pv1",
+        "42",
+        "pr-42.web.example.com",
+        True,
+        "error",
+    )
+    bad = next(p for p in pv if p["id"] == "pv2")
+    assert bad["pr_url"] is None and bad["host"] is None  # only https links and real host names reach the page
+
+
+def test_a_preview_rebuilds_unless_its_app_is_protected(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    assert api.handle(ctx(state), "POST", "preview-redeploy", {}, {"id": "pv1"}) == {"started": "pv1"}
+    assert (
+        "POST",
+        "previewDeployment.redeploy",
+        {"previewDeploymentId": "pv1", "title": "Harness Maxxing"},
+    ) in fake.calls
+    api.handle(ctx(state), "POST", "protect", {}, {"id": "a1", "on": True})
+    code, err = api.handle(ctx(state), "POST", "preview-redeploy", {}, {"id": "pv1"})
+    assert (code, err["error"]) == (409, "protected")

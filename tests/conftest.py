@@ -181,6 +181,28 @@ DASH = {
     },
     "backup.manualBackupPostgres": True,
     "docker.restartContainer": True,
+    "previewDeployment.all": [
+        {
+            "previewDeploymentId": "pv1",
+            "branch": "feat/cart",
+            "pullRequestNumber": "42",
+            "previewStatus": "done",
+            "pullRequestTitle": "New cart",
+            "pullRequestURL": "https://github.com/acme/web/pull/42",
+            "createdAt": "2026-11-10T07:00:00Z",
+            "domain": {"host": "pr-42.web.example.com", "https": True},
+            "deployments": [{"status": "error", "createdAt": "2026-11-10T07:05:00Z"}],
+        },
+        {
+            "previewDeploymentId": "pv2",
+            "pullRequestNumber": "43",
+            "pullRequestURL": "javascript:alert(1)",
+            "domain": {"host": "bad host"},
+            "createdAt": "2026-11-09T07:00:00Z",
+        },
+    ],
+    "previewDeployment.one": {"previewDeploymentId": "pv1", "applicationId": "a1"},
+    "previewDeployment.redeploy": True,
     "swarm.getContainerStats": [
         {"Name": "acme-web-x1.1.abc", "CPUPerc": "12.50%", "MemPerc": "1.00%", "MemUsage": "80MiB / 8GiB"},
         {"Name": "acme-web-x1.2.def", "CPUPerc": "2.50%", "MemPerc": "0.50%", "MemUsage": "40MiB / 8GiB"},

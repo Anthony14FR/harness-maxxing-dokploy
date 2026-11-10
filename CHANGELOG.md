@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.13.0 - 2026-11-10
+
+- **Preview deployments**: Deployments → **Preview deployments** lists, for each app with Dokploy's preview deployments
+  on, the preview of every open pull request: its link, branch, state and preview URL, with **Rebuild** (after you
+  confirm; refused when the app is protected). Deleting a preview stays in Dokploy.
+
 ## 1.12.0 - 2026-11-10
 
 - **Certificates and their expiry**: Domains → **Certificate** shows the certificate visitors really get for each HTTPS

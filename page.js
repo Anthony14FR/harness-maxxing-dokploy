@@ -119,6 +119,9 @@ const T = {
         cols: ["Database", "Engine", "Project", "Containers"], bcols: ["Service", "Database", "Schedule", "Keeps", "Last run", "Active", ""],
         keep: (n) => (n ? `${n} latest` : "all"), never: "never run", run: "Back up now", runQ: (n) => `Back up ${n} now?`,
         runDone: (n) => `Backup of ${n} done: it is on its destination.`, runStarted: (n) => `Backup of ${n} started: it goes on in Dokploy.`, to: (x) => `to ${x}` },
+      prev: { title: "Preview deployments", cols: ["Pull request", "App", "Branch", "Status", "Preview", ""],
+        none: "No preview deployment: one appears here for each open pull request of an app with preview deployments on in Dokploy.",
+        redeploy: "Rebuild", q: (n) => `Rebuild the preview of ${n} now?`, started: (n) => `Preview of ${n} rebuilding.` },
       dep: { cols: ["Service", "Status", "Deployment", "When", "Duration", ""], log: "Log", none: "No deployment yet.", backup: "backup", schedule: "scheduled job",
         queue: (n) => `${n} in the queue` },
       srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `On (${c})`, off: "Off",
@@ -258,6 +261,9 @@ const T = {
         cols: ["Base", "Moteur", "Projet", "Conteneurs"], bcols: ["Service", "Base", "Planification", "Conserve", "Dernière exécution", "Active", ""],
         keep: (n) => (n ? `${n} dernières` : "toutes"), never: "jamais exécutée", run: "Sauvegarder maintenant", runQ: (n) => `Sauvegarder ${n} maintenant ?`,
         runDone: (n) => `Sauvegarde de ${n} faite : elle est sur sa destination.`, runStarted: (n) => `Sauvegarde de ${n} lancée : elle continue dans Dokploy.`, to: (x) => `vers ${x}` },
+      prev: { title: "Déploiements de prévisualisation", cols: ["Pull request", "App", "Branche", "Statut", "Aperçu", ""],
+        none: "Aucune prévisualisation : une apparaît ici pour chaque pull request ouverte d’une app dont les prévisualisations sont activées dans Dokploy.",
+        redeploy: "Reconstruire", q: (n) => `Reconstruire la prévisualisation de ${n} maintenant ?`, started: (n) => `Prévisualisation de ${n} en reconstruction.` },
       dep: { cols: ["Service", "Statut", "Déploiement", "Quand", "Durée", ""], log: "Log", none: "Aucun déploiement pour l’instant.", backup: "sauvegarde", schedule: "tâche planifiée",
         queue: (n) => `${n} en attente` },
       srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `Activé (${c})`, off: "Désactivé",
@@ -1195,10 +1201,35 @@ export function mount(el, ctx) {
     return h("div", { class: "ui-stack" }, card(d.db.title, "database", list), card(d.db.backups, "database-backup", backups, slot));
   }
 
+  // Preview deployments (one per open pull request): read when the tab opens; only Rebuild is offered here.
+  function previewsCard() {
+    const P = d.prev, c = P.cols;
+    const slot = h("div");
+    const body = h("div", {}, h("span", { class: "ui-skeleton", style: "display:block;height:1.2em;width:40%" }));
+    ctx.api("previews").then(({ previews }) => {
+      if (!alive) return;
+      if (!previews.length) { body.replaceChildren(h("p", { class: "ui-muted ui-small" }, P.none)); return; }
+      body.replaceChildren(table(c, previews.map((x) => h("tr", {},
+        td(null, h("span", {}, x.pr_url ? h("a", { class: "ui-link", href: x.pr_url, target: "_blank", rel: "noopener noreferrer" }, `#${x.pr || "?"}`)
+          : h("b", {}, `#${x.pr || "?"}`), x.title ? h("span", { class: "dk-sub" }, x.title) : null)),
+        td(c[1], x.app || "–"),
+        td(c[2], x.branch ? h("code", { class: "ui-code", style: "padding:1px 6px;font-size:13px" }, x.branch) : "–"),
+        td(c[3], status(x.last_deployment || x.status)),
+        td(c[4], x.host ? link({ host: x.host, https: x.https }) : "–"),
+        td(null, btn(P.redeploy, "hammer", () => slot.replaceChildren(confirmPanel({ name: `#${x.pr}` }, P.q(`#${x.pr} (${x.app})`), async () => {
+          try {
+            await ctx.api("preview-redeploy", { method: "POST", body: { id: x.id } });
+            say(P.started(`#${x.pr}`), "ui-success");
+          } catch (e) { fail(e); }
+        }, () => slot.replaceChildren(), [])), "ui-btn ui-outline ui-sm"))))));
+    }).catch((e) => { if (alive) body.replaceChildren(h("p", { class: "ui-muted ui-small" }, e.message)); });
+    return card(P.title, "git-branch", body, slot);
+  }
+
   // ---- Deployments
   function deployments() {
-    if (!dash?.deployments) return card(null, null, missing());
-    if (!dash.deployments.length) return empty(d.dep.none, "rocket");
+    if (!dash?.deployments) return h("div", { class: "ui-stack" }, card(null, null, missing()), previewsCard());
+    if (!dash.deployments.length) return h("div", { class: "ui-stack" }, empty(d.dep.none, "rocket"), previewsCard());
     const slot = h("div");
     const close = () => slot.replaceChildren();
     const c = d.dep.cols;
@@ -1218,7 +1249,8 @@ export function mount(el, ctx) {
     }
     draw();
     return h("div", { class: "ui-stack" },
-      h("div", { class: "dk-tools" }, chips, dash.queue ? h("span", { class: "ui-badge ui-warning" }, d.dep.queue(dash.queue)) : null), slot, listSlot);
+      h("div", { class: "dk-tools" }, chips, dash.queue ? h("span", { class: "ui-badge ui-warning" }, d.dep.queue(dash.queue)) : null), slot, listSlot,
+      previewsCard());
   }
 
   // Live usage: one sample every 5 s while the Server tab is shown and the page visible; 60 samples = 5 minutes.
