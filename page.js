@@ -122,6 +122,9 @@ const T = {
       srv: { infra: "Infrastructure", postgres: "Dokploy database", traefik: "Traefik", ip: "Public IP", cleanup: "Log cleanup", cleanupOn: (c) => `On (${c})`, off: "Off",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommended` : v), docker: "Docker disk usage",
         dcols: ["Type", "Count", "Active", "Size", "Reclaimable"], servers: "Remote servers", noServers: "Only this server.",
+        live: "Live usage", liveHint: "Sampled every 5 s while this tab is open: the last 5 minutes. CPU in % of one core.",
+        liveTotal: "All containers", liveOthers: "Dokploy, Traefik and others", liveCols: ["Service", "CPU", "Memory", "Last 5 min"],
+        livePaused: "Paused while the page is hidden.", liveWait: "First samples…",
         services: (n) => `${n} swarm services`, checked: (w) => `Checked ${w}`, healthy: "Healthy", outdated: "Update available", on: "On",
         cache: (s) => `Build cache: ${s}`, cacheBtn: "Clear the build cache", cacheQ: "Clear Docker's build cache now?",
         cacheDone: (f) => (f ? `Build cache cleared: ${f} freed.` : "Build cache cleared."), cacheSafe: "Only the build cache can be cleared here: your data, images and containers are never touched." },
@@ -256,6 +259,9 @@ const T = {
       srv: { infra: "Infrastructure", postgres: "Base de Dokploy", traefik: "Traefik", ip: "IP publique", cleanup: "Nettoyage des logs", cleanupOn: (c) => `Activé (${c})`, off: "Désactivé",
         traefikVer: (v, r) => (r && r !== v ? `${v} · ${r} recommandée` : v), docker: "Espace disque Docker",
         dcols: ["Type", "Nombre", "Actifs", "Taille", "Récupérable"], servers: "Serveurs distants", noServers: "Uniquement ce serveur.",
+        live: "Utilisation en direct", liveHint: "Mesurée toutes les 5 s tant que cet onglet est ouvert : les 5 dernières minutes. Processeur en % d’un cœur.",
+        liveTotal: "Tous les conteneurs", liveOthers: "Dokploy, Traefik et autres", liveCols: ["Service", "Processeur", "Mémoire", "5 dernières min"],
+        livePaused: "En pause tant que la page est masquée.", liveWait: "Premières mesures…",
         services: (n) => `${n} services swarm`, checked: (w) => `Vérifié ${w}`, healthy: "Sain", outdated: "Mise à jour disponible", on: "Activée",
         cache: (s) => `Cache de build : ${s}`, cacheBtn: "Vider le cache de build", cacheQ: "Vider le cache de build de Docker maintenant ?",
         cacheDone: (f) => (f ? `Cache de build vidé : ${f} libérés.` : "Cache de build vidé."), cacheSafe: "Seul le cache de build peut être vidé ici : vos données, images et conteneurs ne sont jamais touchés." },
@@ -339,6 +345,10 @@ const CSS = `
 .dk .dk-upd{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .dk .dk-upd .dk-grow{flex:1 1 260px}
 .dk .dk-short{display:none}
+.dk .dk-spark{display:block;max-width:100%;height:auto;overflow:visible}
+.dk .dk-spark-line{fill:none;stroke:var(--primary);stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.dk .dk-spark-base{stroke:var(--border);stroke-width:1;vector-effect:non-scaling-stroke}
+.dk .dk-spark-dot{fill:var(--primary)}
 .dk .dk-log{max-height:420px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.45;margin:0}
 .dk .dk-follow{display:inline-flex;align-items:center;gap:6px;font-size:13px;min-height:36px;cursor:pointer}
 .dk .dk-md{max-height:260px;overflow:auto;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--muted);font-size:13px;line-height:1.5}
@@ -766,7 +776,7 @@ export function mount(el, ctx) {
       if (!alive) return;
       const on = !!job?.enabled;
       const last = job?.last_run;
-      body.replaceChildren(
+      body.replaceChildren(h("div", { class: "ui-stack", style: "gap:8px" },  // h() skips a missing last run
         h("p", {}, h("span", { class: `ui-badge ${on ? "ui-success" : "ui-outline"}` }, on ? a.badgeOn : a.badgeOff), " ", on ? a.on : a.off),
         h("p", { class: "ui-muted ui-small" }, a.how),
         last?.at ? h("p", { class: "ui-muted ui-small" }, a.last(ago(new Date(last.at * 1000).toISOString()), last.ok)) : null,
@@ -778,7 +788,7 @@ export function mount(el, ctx) {
           job && on ? btn(a.runNow, "refresh-cw", async () => {
             try { await harness(`crons/${encodeURIComponent(job.id)}/run`, { method: "POST" }); say(a.ran, "ui-success"); } catch (e) { fail(e); }
           }, "ui-btn ui-ghost ui-sm") : null,
-          btn(a.rules, "settings", () => ctx.navigate("/settings/notifications"), "ui-btn ui-ghost ui-sm")));
+          btn(a.rules, "settings", () => ctx.navigate("/settings/notifications"), "ui-btn ui-ghost ui-sm"))));
     };
     draw();
     return card(a.title, "bell", body);
@@ -1176,6 +1186,84 @@ export function mount(el, ctx) {
       h("div", { class: "dk-tools" }, chips, dash.queue ? h("span", { class: "ui-badge ui-warning" }, d.dep.queue(dash.queue)) : null), slot, listSlot);
   }
 
+  // Live usage: one sample every 5 s while the Server tab is shown and the page visible; 60 samples = 5 minutes.
+  const LIVE_EVERY = 5000, LIVE_KEEP = 60;
+  const liveHist = new Map();  // service id (or "_total", "_others") -> [{cpu, mem}]
+  let liveTimer = null, liveBusy = false, liveBody = null;
+  const SVG = "http://www.w3.org/2000/svg";
+  function spark(values, max, label, w = 120, hgt = 28) {
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", `0 0 ${w} ${hgt}`);
+    svg.setAttribute("width", String(w));
+    svg.setAttribute("height", String(hgt));
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", label);
+    svg.classList.add("dk-spark");
+    const top = Math.max(max || 0, ...values, 1e-9);
+    const step = w / (LIVE_KEEP - 1);  // the newest sample sits on the right edge, older ones to its left
+    const pts = values.map((v, i) => `${(w - (values.length - 1 - i) * step).toFixed(1)},${(hgt - 2 - (v / top) * (hgt - 4)).toFixed(1)}`);
+    const base = document.createElementNS(SVG, "line");
+    Object.entries({ x1: 0, y1: hgt - 1, x2: w, y2: hgt - 1, class: "dk-spark-base" }).forEach(([k, v]) => base.setAttribute(k, v));
+    const line = document.createElementNS(SVG, "polyline");
+    line.setAttribute("points", pts.join(" "));
+    line.setAttribute("class", "dk-spark-line");
+    const dot = document.createElementNS(SVG, "circle");  // the newest sample, readable from the first one
+    const [lx, ly] = (pts.at(-1) || `${w},${hgt - 2}`).split(",");
+    Object.entries({ cx: lx, cy: ly, r: 2.5, class: "dk-spark-dot" }).forEach(([k, v]) => dot.setAttribute(k, v));
+    svg.append(base, line, dot);
+    return svg;
+  }
+  const push = (key, s) => { const a = liveHist.get(key) || []; a.push(s); if (a.length > LIVE_KEEP) a.shift(); liveHist.set(key, a); };
+  function drawLive() {
+    if (!liveBody || !liveBody.isConnected) return;
+    const r = d.srv, cols = r.liveCols;
+    const total = liveHist.get("_total") || [];
+    if (!total.length) { liveBody.replaceChildren(h("p", { class: "ui-muted ui-small" }, r.liveWait)); return; }
+    const cores = dash?.resources?.cpus || 1, memTotal = dash?.resources?.mem_total || null;
+    const last = total[total.length - 1];
+    const row = (key, name) => {
+      const hist = liveHist.get(key) || [];
+      const cur = hist[hist.length - 1] || { cpu: 0, mem: 0 };
+      return h("tr", {}, td(null, h("b", {}, name)), td(cols[1], h("span", { class: "ui-num" }, `${nf.format(cur.cpu)} %`)),
+        td(cols[2], h("span", { class: "ui-num" }, bytes(cur.mem))),
+        td(cols[3], spark(hist.map((x) => x.cpu), Math.max(1, ...hist.map((x) => x.cpu * 1.25)), `${name}: ${cols[1]} ${nf.format(cur.cpu)} %`)));
+    };
+    const svcRows = [...liveHist.keys()].filter((k) => !k.startsWith("_"))
+      .map((k) => [k, (liveHist.get(k).at(-1) || {}).cpu || 0]).sort((a, b) => b[1] - a[1]).slice(0, 12)
+      .map(([k]) => row(k, (services.find((s) => s.id === k) || dash?.services?.find((s) => s.id === k) || {}).name || k));
+    liveBody.replaceChildren(h("div", { class: "ui-stack" },  // h() skips the null parts, replaceChildren would print them
+      h("div", { class: "dk-cols" },
+        h("div", { class: "dk-meter" }, h("div", { class: "dk-meter-row" }, h("b", {}, `${d.res.cpu} · ${r.liveTotal}`), h("span", { class: "ui-spacer" }),
+          h("span", { class: "ui-num ui-muted" }, `${nf.format(last.cpu)} % / ${cores * 100} %`)),
+          spark(total.map((x) => x.cpu), Math.max(10, ...total.map((x) => x.cpu * 1.25)), `${d.res.cpu} ${nf.format(last.cpu)} %`, 320, 56)),
+        h("div", { class: "dk-meter" }, h("div", { class: "dk-meter-row" }, h("b", {}, `${d.res.mem} · ${r.liveTotal}`), h("span", { class: "ui-spacer" }),
+          h("span", { class: "ui-num ui-muted" }, memTotal ? d.res.of(bytes(last.mem), bytes(memTotal)) : bytes(last.mem))),
+          spark(total.map((x) => x.mem), memTotal, `${d.res.mem} ${bytes(last.mem)}`, 320, 56))),
+      table(cols, [...svcRows, row("_others", r.liveOthers)]),
+      document.visibilityState === "visible" ? null : h("p", { class: "ui-muted ui-small" }, r.livePaused)));
+  }
+  async function sample() {
+    const panel = panels.get("server");
+    if (liveBusy || !alive || !panel || panel.hidden || document.visibilityState !== "visible") return;
+    liveBusy = true;
+    try {
+      const s = await ctx.api("stats");
+      let cpu = s.others.cpu, mem = s.others.mem;
+      for (const x of s.services) { push(x.id, { cpu: x.cpu, mem: x.mem }); cpu += x.cpu; mem += x.mem; }
+      push("_others", { cpu: s.others.cpu, mem: s.others.mem });
+      push("_total", { cpu: Math.round(cpu * 100) / 100, mem });
+    } catch { /* a missed sample: the curve just has a gap */ }
+    liveBusy = false;
+    drawLive();
+  }
+  function liveCard() {
+    liveBody = h("div", { class: "ui-stack" });
+    drawLive();
+    if (!liveTimer) liveTimer = setInterval(sample, LIVE_EVERY);
+    sample();
+    return card(d.srv.live, "activity", h("p", { class: "ui-muted ui-small" }, d.srv.liveHint), liveBody);
+  }
+
   // The one cleanup offered: Docker's build cache (rebuilt by the next builds); the server refuses any other target.
   function cacheTools() {
     const cache = (dash?.disk_usage || []).find((x) => /^build/i.test(String(x.type || "")));
@@ -1230,7 +1318,7 @@ export function mount(el, ctx) {
       : h("ul", { class: "dk-list" }, dash.servers.map((s) => h("li", {}, h("span", { class: "dk-ico" }, icon("server")),
         h("span", { class: "dk-grow" }, h("b", {}, s.name || "–"), h("span", { class: "dk-sub" }, [s.ip, s.type].filter(Boolean).join(" · "))),
         s.status ? h("span", { class: `ui-badge ${s.status === "active" ? "ui-success" : "ui-outline"}` }, s.status) : null))));
-    return h("div", { class: "dk-cols" }, res, inf, docker, srv);
+    return h("div", { class: "ui-stack" }, liveCard(), h("div", { class: "dk-cols" }, res, inf, docker, srv));
   }
 
   // ---- load
@@ -1309,5 +1397,6 @@ export function mount(el, ctx) {
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("scroll", onScroll, true);
     window.removeEventListener("resize", onScroll);
+    clearInterval(liveTimer);
   };
 }
