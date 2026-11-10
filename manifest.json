@@ -3,6 +3,6 @@
   "name": {"en": "Dokploy", "fr": "Dokploy"},
   "type": "page",
   "icon": "rocket",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "api": 1
 }

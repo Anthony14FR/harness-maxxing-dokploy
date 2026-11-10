@@ -318,3 +318,13 @@ def test_the_cli_scales_only_with_yes(api, fake, state, maxxing_bin, core, capsy
 def test_an_applications_running_container_restarts(api, fake, state):
     api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
     assert api.handle(ctx(state), "POST", "restart", {}, {"id": "a1", "container": "1"}) == {"restarted": "1"}
+
+
+def test_live_stats_are_grouped_per_service(api, fake, state):
+    api.handle(ctx(state), "POST", "connect", {}, {"url": fake.url})
+    s = api.handle(ctx(state), "GET", "stats", {}, None)
+    by = {x["id"]: x for x in s["services"]}
+    assert (by["a1"]["cpu"], by["a1"]["mem"], by["a1"]["containers"]) == (15.0, 120 * 1024**2, 2)  # its 2 replicas
+    assert (by["c1"]["cpu"], by["c1"]["mem"]) == (1.0, 16_500_000)
+    assert "pg1" not in by  # no container of it in the stats: not listed
+    assert (s["others"]["cpu"], s["others"]["containers"]) == (3.0, 2)  # Dokploy itself and the unreadable row

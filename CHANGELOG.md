@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.0 - 2026-11-10
+
+- **Live CPU and memory**: Server → **Live usage** draws the CPU and memory of all containers and of each service
+  over the last 5 minutes, sampled every 5 seconds while the tab is open and the page visible (it pauses otherwise).
+  It needs no Dokploy monitoring: it reads Docker's own stats. Dokploy, Traefik and the rest are grouped apart.
+
 ## 1.10.0 - 2026-11-10
 
 - **Restart one container**: Services → **More** → **Restart a container** lists the service's own containers (the

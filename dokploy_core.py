@@ -1595,3 +1595,61 @@ def scale(c: Client, svc: dict, replicas: int) -> dict:
     c.post("application.update", {"applicationId": svc["id"], "replicas": replicas})
     c.post("application.reload", {"applicationId": svc["id"], "appName": svc["app_name"]})
     return {"replicas": replicas}
+
+
+# Live usage: Docker's instant stats (swarm.getContainerStats, works without Dokploy's paid monitoring) grouped per
+# service; the page samples it every few seconds while its Server tab is open and draws the curves itself.
+_SIZE_RE = re.compile(r"^\s*([\d.]+)\s*([KMGT]?i?B)\s*$", re.I)
+_UNITS = {
+    "b": 1,
+    "kb": 1e3,
+    "mb": 1e6,
+    "gb": 1e9,
+    "tb": 1e12,
+    "kib": 1024,
+    "mib": 1024**2,
+    "gib": 1024**3,
+    "tib": 1024**4,
+}
+
+
+def _size(s: Any) -> float | None:
+    m = _SIZE_RE.match(str(s or ""))
+    return float(m[1]) * _UNITS[m[2].lower()] if m and m[2].lower() in _UNITS else None
+
+
+def _pct_of(s: Any) -> float | None:
+    try:
+        return round(float(str(s).strip().rstrip("%")), 2)
+    except ValueError:
+        return None
+
+
+def live_stats(c: Client) -> dict:
+    """{at, services: [{id, name, kind, cpu, mem, mem_pct, containers}], others: {...}}: CPU in % of one core."""
+    rows = _rows(c.get("swarm.getContainerStats"))
+    svcs = [
+        _pick(s, {"id": "id", "name": "name", "appName": "app_name", "type": "kind"})
+        for s in _rows(_try(c, "overview.services"))
+    ]
+    out = {s["id"]: {**s, "cpu": 0.0, "mem": 0.0, "mem_pct": 0.0, "containers": 0} for s in svcs if s.get("app_name")}
+    others = {"cpu": 0.0, "mem": 0.0, "mem_pct": 0.0, "containers": 0}  # Dokploy itself, Traefik, the rest
+    for r in rows:
+        name = str(r.get("Name") or "")
+        mem = _size(str(r.get("MemUsage") or "").split("/")[0])
+        cpu, mem_pct = _pct_of(r.get("CPUPerc")), _pct_of(r.get("MemPerc"))
+        owner = next(
+            (
+                s
+                for s in out.values()
+                if _mine(name, s["app_name"], "compose" if s.get("kind") == "compose" else "application")
+            ),
+            None,
+        )
+        acc = owner if owner is not None else others
+        acc["cpu"] += cpu or 0.0
+        acc["mem"] += mem or 0.0
+        acc["mem_pct"] += mem_pct or 0.0
+        acc["containers"] += 1
+    rnd = lambda d: {**d, "cpu": round(d["cpu"], 2), "mem_pct": round(d["mem_pct"], 2), "mem": int(d["mem"])}  # noqa: E731
+    return {"at": time.time(), "services": [rnd(s) for s in out.values() if s["containers"]], "others": rnd(others)}

@@ -35,7 +35,8 @@ flowchart LR
   - **Domains**: every domain, HTTPS or not, its certificate, and the ones a compose routes with its own Traefik labels;
   - **Databases**: their containers and their backups (schedule, last run, destination), with **Back up now**;
   - **Deployments**: apps, stacks and backups, failed or in progress, with duration, error and log;
-  - **Server**: resources, Dokploy's database and Traefik (version, update available), public IP, Docker disk usage,
+  - **Server**: **live usage** (CPU and memory of every service and of all containers, sampled every 5 s while the
+    tab is open, last 5 minutes), resources, Dokploy's database and Traefik (version, update available), public IP, Docker disk usage,
     remote servers, and **Clear the build cache**: the only cleanup offered (`docker builder prune`, refused while a
     build runs). Volumes (your data), images (what a rollback starts again), containers and databases are never
     touched: Dokploy's other cleanups are not reachable from here.
@@ -168,7 +169,8 @@ validated first.
 - Dashboard reads: `project.homeStats`, `docker.getServerHealth`, `docker.getContainers`,
   `settings.checkInfrastructureHealth`, `settings.getTraefikOverview`, `settings.getIp`, `settings.getDockerDiskUsage`,
   `settings.getLogCleanupStatus`, `server.all`, `overview.services`, `overview.domains`, `overview.backups`,
-  `deployment.allCentralized`, `deployment.queueList`, `<database>.one` (its backups; their destination keeps only
+  `deployment.allCentralized`, `deployment.queueList`, `swarm.getContainerStats` (live usage, only while the
+  Server tab is open), `<database>.one` (its backups; their destination keeps only
   its name), `backup.one`, and for **Logs** `application.readLogs`, `compose.readLogs`
   (one of the stack's own containers only) and `<database>.readLogs`. Only listed plain fields are kept: nested objects (where Dokploy
   puts ssh keys, certificate and S3 keys) never leave the server, and the procedures that return secrets

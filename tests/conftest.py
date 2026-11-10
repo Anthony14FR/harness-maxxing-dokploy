@@ -181,6 +181,13 @@ DASH = {
     },
     "backup.manualBackupPostgres": True,
     "docker.restartContainer": True,
+    "swarm.getContainerStats": [
+        {"Name": "acme-web-x1.1.abc", "CPUPerc": "12.50%", "MemPerc": "1.00%", "MemUsage": "80MiB / 8GiB"},
+        {"Name": "acme-web-x1.2.def", "CPUPerc": "2.50%", "MemPerc": "0.50%", "MemUsage": "40MiB / 8GiB"},
+        {"Name": "acme-stack-web-1", "CPUPerc": "1.00%", "MemPerc": "0.20%", "MemUsage": "16.5MB / 8GiB"},
+        {"Name": "dokploy.1.zzz", "CPUPerc": "3.00%", "MemPerc": "4.00%", "MemUsage": "300MiB / 8GiB"},
+        {"Name": "odd", "CPUPerc": "--", "MemPerc": "", "MemUsage": "n/a"},
+    ],
     "application.update": True,
     "application.reload": True,
     "overview.domains": [
